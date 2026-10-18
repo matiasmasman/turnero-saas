@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Panel de Barberos - Men's Club</title>
+    <link rel="stylesheet" href="css/panel.css">
+</head>
+
+<body>
+
+    <div class="container">
+        <div class="header">
+            <div class="logo" id="headerTitle">BARBERSHOP</div>
+            <a id="logoutBtn" class="logout-link" onclick="logout()">Cerrar sesión</a>
+        </div>
+
+        <!-- LOGIN -->
+        <div class="card" id="loginSection">
+            <form id="loginForm">
+                <div class="form-group">
+                    <input type="text" id="username" placeholder="Usuario" required>
+                </div>
+                <div class="form-group">
+                    <input type="password" id="password" placeholder="Contraseña" required>
+                </div>
+                <button type="submit" class="btn-primary">Ingresar</button>
+            </form>
+        </div>
+
+        <!-- AGENDA -->
+        <div class="card" id="dashboardSection">
+            <div class="agenda-header">
+                <div class="agenda-title">
+                    <h2>Agenda Semanal</h2>
+
+                    <!-- Navegador de Semana (Lunes a Domingo) -->
+                    <div class="week-navigator">
+                        <button type="button" id="prevWeekBtn" class="week-nav-btn" onclick="changeWeek(-1)"
+                            title="Semana anterior" disabled>
+                            &#8249;
+                        </button>
+                        <span id="weekSubtitle" class="week-range-text">SEMANA ACTUAL</span>
+                        <button type="button" id="nextWeekBtn" class="week-nav-btn" onclick="changeWeek(1)"
+                            title="Siguiente semana">
+                            &#8250;
+                        </button>
+                    </div>
+
+                    <!-- Botón rápido que aparece solo cuando estás mirando semanas futuras -->
+                    <button type="button" id="resetWeekBtn" class="btn-reset-week" onclick="resetToCurrentWeek()"
+                        style="display: none;">
+                        ↺ Volver a esta semana
+                    </button>
+                </div>
+
+                <div class="controls-wrapper">
+                    <!-- Fila 1: Filtros -->
+                    <div class="controls-row">
+                        <label class="control-pill">
+                            <input type="checkbox" id="onlyTodayCheck">
+                            <span>Solo Hoy</span>
+                        </label>
+
+                        <!-- Visible solo para el Dueño -->
+                        <label class="control-pill" id="onlyMineControl" style="display: none;">
+                            <input type="checkbox" id="onlyMineCheck">
+                            <span>Mis Turnos</span>
+                        </label>
+                    </div>
+
+                    <!-- Fila 2: Navegación -->
+                    <div class="controls-row">
+                        <button type="button" class="control-pill" onclick="showSchedule()">
+                            🕒 Horarios
+                        </button>
+                        <button type="button" class="control-pill" onclick="showExceptions()">
+                            🚫 Excepciones
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <div id="agendaContent">Cargando...</div>
+        </div>
+
+        <!-- HORARIO HABITUAL -->
+        <section id="scheduleSection" style="display: none;">
+            <div class="exceptions-card">
+                <!-- Cabecera unificada -->
+                <div class="exc-header">
+                    <div class="exc-header-titles">
+                        <h2>Horario Habitual</h2>
+                        <p>DÍAS Y TURNOS DE ATENCIÓN</p>
+                    </div>
+                    <div class="exc-nav-pills">
+                        <button type="button" class="control-pill" onclick="showExceptions()">
+                            🚫 Excepciones
+                        </button>
+                        <button type="button" class="control-pill" onclick="showDashboard()">
+                            📅 Turnos
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Nota integrada -->
+                <div class="exc-hint">
+                    <span>Para trabajar de corrido, completá solo el <strong>1° Turno</strong> y dejá vacío el <strong>2° Turno</strong>.</span>
+                </div>
+
+                <form id="scheduleForm">
+                    <div id="daysContainer" class="schedule-days-box"></div>
+                    <button type="submit" class="btn-add-exception" style="margin-top: 16px;">
+                        Guardar Horarios
+                    </button>
+                </form>
+            </div>
+        </section>
+
+        <!-- FERIADOS Y EXCEPCIONES -->
+        <section id="exceptionsSection" style="display: none;">
+            <div class="exceptions-card">
+                <!-- Cabecera alineada con botones tipo píldora -->
+                <div class="exc-header">
+                    <div class="exc-header-titles">
+                        <h2>Feriados y Excepciones</h2>
+                        <p>BLOQUEOS DE AGENDA</p>
+                    </div>
+                    <div class="exc-nav-pills">
+                        <button type="button" class="control-pill" onclick="showSchedule()">
+                            🕒 Horarios
+                        </button>
+                        <button type="button" class="control-pill" onclick="showDashboard()">
+                            📅 Turnos
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Formulario compacto -->
+                <form id="exceptionForm" class="exception-form-box">
+                    <!-- Nota integrada sutil -->
+                    <div class="exc-hint">
+                        <span>Para bloquear el día completo, elegí la fecha y dejá vacíos los campos de hora.</span>
+                    </div>
+
+                    <div class="exception-grid">
+                        <div class="exc-field exc-field-full">
+                            <label for="excDate">FECHA A BLOQUEAR</label>
+                            <input type="date" id="excDate" required>
+                        </div>
+                        <div class="exc-field">
+                            <label for="excStart">DESDE (OPCIONAL)</label>
+                            <input type="time" id="excStart">
+                        </div>
+                        <div class="exc-field">
+                            <label for="excEnd">HASTA (OPCIONAL)</label>
+                            <input type="time" id="excEnd">
+                        </div>
+                    </div>
+
+                    <!-- Checkbox visible ÚNICAMENTE cuando se loguea el Dueño -->
+                    <div id="globalExceptionWrapper" class="exc-global-check" style="display: none;">
+                        <label class="exc-checkbox-card">
+                            <input type="checkbox" id="excGlobal">
+                            <span>Bloquear a toda la barbería</span>
+                        </label>
+                    </div>
+
+                    <button type="submit" class="btn-add-exception">Agregar Excepción</button>
+                </form>
+
+                <!-- Lista de próximos bloqueos -->
+                <div class="upcoming-blocks">
+                    <div class="upcoming-header">Próximos bloqueos</div>
+                    <div id="exceptionsList" class="exceptions-list-box">
+                        <p class="empty-exceptions">No hay excepciones programadas.</p>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </div>
+
+    <script src="js/panel.js"></script>
+</body>
+
+</html>

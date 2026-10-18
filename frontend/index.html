@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Reserva tu Turno - Men's Club</title>
+    <link rel="stylesheet" href="css/main.css">
+</head>
+
+<body>
+
+    <div class="container">
+        <div class="header">
+            <div class="logo">Men's Club</div>
+            <a href="panel.html" class="login-link">Soy el peluquero</a>
+        </div>
+
+        <div class="card">
+            <h2>Reservá tu turno</h2>
+
+            <form id="appointmentForm">
+                <div class="form-group">
+                    <label>Nombre Completo</label>
+                    <input type="text" id="client_name" placeholder="Juan Diaz" required>
+                </div>
+
+                <div class="form-group">
+                    <label>Teléfono / WhatsApp</label>
+                    <input type="tel" id="client_phone" placeholder="261 123-4567" maxlength="10" pattern="[0-9]{10}"
+                        title="Debe tener exactamente 10 números" required>
+                </div>
+
+                <div class="form-group">
+                    <label>Servicio</label>
+                    <select id="service" required>
+                        <option value="Corte">Corte</option>
+                        <option value="Corte + Barba">Corte + Barba</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label>Barbero</label>
+                    <select id="employee_id">
+                        <option value="">Cualquiera disponible</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label>Fecha</label>
+                    <input type="date" id="appointmentDate" required>
+                </div>
+
+                <div class="form-group">
+                    <label>Horario</label>
+                    <select id="timeSelect" required disabled>
+                        <option value="">Primero elige un barbero y una fecha</option>
+                    </select>
+                </div>
+
+                <button type="submit">Confirmar Turno</button>
+            </form>
+        </div>
+
+        <div class="footer">
+            <a href="https://wa.me/5492616839354?text=Hola Matias!%20Vi%20el%20sistema%20de%20turnos%20de%20Men's%20Club%20y%20me%20gustaría%20hacerte%20una%20consulta."
+                target="_blank" rel="noopener noreferrer" class="footer-wpp-link">
+                ¿Necesitás este sistema o un desarrollo a medida? <span>Contactame</span>
+            </a>
+        </div>
+    </div>
+
+    <script src="js/index.js"></script>
+</body>
+
+</html>

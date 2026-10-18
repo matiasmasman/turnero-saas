@@ -1,0 +1,25 @@
+# Entorno virtual y caché de Python
+venv/
+.venv/
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Base de datos local (Contiene PII y credenciales)
+*.db
+*.sqlite3
+turnero_dev.db
+
+# Telemetría y logs para SIEM
+logs/
+*.log
+
+# Variables de entorno y secretos
+.env
+.env.*
+!.env.example
+
+# Archivos del sistema / IDE
+.DS_Store
+.vscode/
+.idea/
