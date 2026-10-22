@@ -1,3 +1,7 @@
+const API_URL = window.location.origin.includes('file://') 
+    ? 'http://127.0.0.1:8000' 
+    : window.location.origin;
+
 document.addEventListener('DOMContentLoaded', async () => {
     const barberSelect = document.getElementById('employee_id');
     const dateInput = document.getElementById('appointmentDate');
@@ -12,7 +16,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // 2. Cargar los Barberos dinámicamente
     try {
-        const response = await fetch('http://127.0.0.1:8000/appointments/barbers');
+        const response = await fetch(API_URL + '/appointments/barbers');
         if (response.ok) {
             const barbers = await response.json();
             barberSelect.innerHTML = '<option value="">Cualquiera disponible</option>';
@@ -44,7 +48,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             timeSelect.innerHTML = '<option value="">Cargando horarios...</option>';
             timeSelect.disabled = true;
 
-            let url = `http://127.0.0.1:8000/appointments/available-slots?target_date=${selectedDate}`;
+            let url = API_URL + '/appointments/available-slots?target_date=' + selectedDate;
             if (barberId) {
                 url += `&employee_id=${barberId}`;
             }
@@ -108,7 +112,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
             try {
                 // Hacemos la petición POST a nuestra API
-                const response = await fetch('http://127.0.0.1:8000/appointments/', {
+                const response = await fetch(API_URL + '/appointments/', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'

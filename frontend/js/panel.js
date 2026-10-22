@@ -1,4 +1,6 @@
-const API_URL = 'http://127.0.0.1:8000';
+const API_URL = window.location.origin.includes('file://') 
+    ? 'http://127.0.0.1:8000' 
+    : window.location.origin;
 let allAppointmentsCache = [];
 let currentUser = null; // { id, name, username, role }
 let currentWeekOffset = 0; // 0 = Esta semana, 1 = Próxima semana, etc.

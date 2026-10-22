@@ -5,6 +5,7 @@ from app.core.telemetry import sec_logger
 from app.database import engine
 import app.models as models
 from app.routers import auth, appointments, admin
+from fastapi.staticfiles import StaticFiles
 
 # Crea las tablas en la base de datos
 models.Base.metadata.create_all(bind=engine)
@@ -25,7 +26,7 @@ app.include_router(auth.router)
 app.include_router(appointments.router)
 app.include_router(admin.router)
 
-@app.get("/")
+@app.get("/health")
 def read_root():
     return {"message": "El sistema está arriba y siendo monitoreado"}
 
@@ -41,3 +42,5 @@ def trigger_alert(request: Request):
         }
     )
     return {"message": "Alerta registrada en los logs"}
+
+app.mount("/", StaticFiles(directory="frontend", html=True), name="frontend")
