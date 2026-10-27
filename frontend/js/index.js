@@ -3,15 +3,31 @@ const API_URL = window.location.origin.includes('file://')
     : window.location.origin;
 
 document.addEventListener('DOMContentLoaded', async () => {
+    const serviceSelect = document.getElementById('service');
     const barberSelect = document.getElementById('employee_id');
     const dateInput = document.getElementById('appointmentDate');
     const timeSelect = document.getElementById('timeSelect');
 
-    // 1. Configuramos la fecha mínima como HOY
     const todayStr = new Date().toISOString().split('T')[0];
     if (dateInput) {
         dateInput.min = todayStr;
         dateInput.value = todayStr;
+    }
+
+    // 1. Cargar precios configurados por el dueño para mostrarlos en el combo de Servicio
+    try {
+        const resPrices = await fetch(API_URL + '/appointments/services');
+        if (resPrices.ok && serviceSelect) {
+            const prices = await resPrices.json();
+            const fmt = (n) => Number(n).toLocaleString('es-AR');
+            serviceSelect.innerHTML = `
+                <option value="Corte">Corte — $${fmt(prices.price_corte)}</option>
+                <option value="Barba">Barba — $${fmt(prices.price_barba)}</option>
+                <option value="Corte + Barba">Corte + Barba — $${fmt(prices.price_corte_barba)}</option>
+            `;
+        }
+    } catch (e) {
+        console.error("No se pudieron cargar los precios:", e);
     }
 
     // 2. Cargar los Barberos dinámicamente
@@ -26,8 +42,6 @@ document.addEventListener('DOMContentLoaded', async () => {
                 option.textContent = barber.name;
                 barberSelect.appendChild(option);
             });
-        } else {
-            console.error("El backend falló al devolver los barberos.");
         }
     } catch (error) {
         console.error("Error de conexión al obtener barberos:", error);
@@ -37,6 +51,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     async function updateAvailableTimes() {
         const barberId = barberSelect.value;
         const selectedDate = dateInput.value;
+        const selectedService = serviceSelect ? serviceSelect.value : 'Corte';
 
         if (!selectedDate) {
             timeSelect.innerHTML = '<option value="">Primero elige una fecha</option>';
@@ -48,9 +63,9 @@ document.addEventListener('DOMContentLoaded', async () => {
             timeSelect.innerHTML = '<option value="">Cargando horarios...</option>';
             timeSelect.disabled = true;
 
-            let url = API_URL + '/appointments/available-slots?target_date=' + selectedDate;
+            let url = `${API_URL}/appointments/available-slots?target_date=${encodeURIComponent(selectedDate)}&service=${encodeURIComponent(selectedService)}`;
             if (barberId) {
-                url += `&employee_id=${barberId}`;
+                url += `&employee_id=${encodeURIComponent(barberId)}`;
             }
 
             const response = await fetch(url);
@@ -60,7 +75,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                 timeSelect.innerHTML = '';
 
                 if (slots.length === 0) {
-                    timeSelect.innerHTML = '<option value="">Día no laborable o completo</option>';
+                    timeSelect.innerHTML = '<option value="">Día no laborable o sin disponibilidad</option>';
                 } else {
                     timeSelect.innerHTML = '<option value="">Selecciona un horario</option>';
                     slots.forEach(slot => {
@@ -80,24 +95,22 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
     }
 
-    // 4. Escuchadores de eventos
+    if (serviceSelect) serviceSelect.addEventListener('change', updateAvailableTimes);
     if (barberSelect) barberSelect.addEventListener('change', updateAvailableTimes);
     if (dateInput) dateInput.addEventListener('change', updateAvailableTimes);
 
-    // 5. Enviar los datos al backend para Confirmar el Turno
+    // 4. Confirmar Turno
     const appointmentForm = document.getElementById('appointmentForm');
 
     if (appointmentForm) {
         appointmentForm.addEventListener('submit', async (e) => {
-            e.preventDefault(); // Evitamos que la página se recargue al enviar el formulario
+            e.preventDefault();
 
-            // Cambiamos el texto del botón para que el usuario sepa que está cargando
             const submitBtn = appointmentForm.querySelector('button[type="submit"]');
             const originalText = submitBtn.textContent;
             submitBtn.textContent = 'Procesando...';
             submitBtn.disabled = true;
 
-            // Recolectamos los datos y los adaptamos al formato que espera FastAPI
             const rawEmployeeId = document.getElementById('employee_id').value;
 
             const payload = {
@@ -106,45 +119,45 @@ document.addEventListener('DOMContentLoaded', async () => {
                 service: document.getElementById('service').value,
                 date: document.getElementById('appointmentDate').value,
                 time: document.getElementById('timeSelect').value,
-                // Si eligió "Cualquiera", mandamos null. Si eligió a alguien, lo convertimos a número entero.
                 employee_id: rawEmployeeId ? parseInt(rawEmployeeId) : null
             };
 
             try {
-                // Hacemos la petición POST a nuestra API
                 const response = await fetch(API_URL + '/appointments/', {
                     method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
+                    headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(payload)
                 });
 
                 if (response.ok) {
-                    // Turno creado exitosamente
-                    alert(`¡Turno confirmado con éxito!\nTe esperamos el ${payload.date} a las ${payload.time}.`);
+                    const createdAppt = await response.json();
+                    const barberOption = barberSelect
+                        ? barberSelect.querySelector(`option[value="${createdAppt.employee_id}"]`)
+                        : null;
+                    const assignedBarberName = createdAppt.employee_name 
+                        || (barberOption ? barberOption.textContent.trim() : 'Asignado');
 
-                    // Limpiamos el formulario y reseteamos la fecha a hoy
+                    alert(
+                        `¡Turno confirmado con éxito!\n` +
+                        `Barbero: ${assignedBarberName}\n` +
+                        `Te esperamos el ${payload.date} a las ${payload.time}.`
+                    );
                     appointmentForm.reset();
                     document.getElementById('appointmentDate').value = todayStr;
-                    updateAvailableTimes(); // Volvemos a calcular los horarios libres
+                    updateAvailableTimes();
                 } else {
-                    // Si el backend rechaza el turno (ej: alguien más lo sacó un segundo antes)
                     const error = await response.json();
                     alert(`No se pudo reservar: ${error.detail || 'Horario no disponible.'}`);
-                    updateAvailableTimes(); // Actualizamos la lista por las dudas
+                    updateAvailableTimes();
                 }
             } catch (error) {
-                console.error("Error al confirmar el turno:", error);
                 alert("Error de conexión con el servidor. Intentá nuevamente.");
             } finally {
-                // Restauramos el botón a la normalidad
                 submitBtn.textContent = originalText;
                 submitBtn.disabled = false;
             }
         });
     }
 
-    // Carga inicial
     updateAvailableTimes();
 });

@@ -14,7 +14,6 @@ def login(
     form_data: OAuth2PasswordRequestForm = Depends(), 
     db: Session = Depends(get_db)
 ):
-    # Buscamos al usuario en la BD por su username
     user = db.query(User).filter(User.username == form_data.username).first()
 
     if not user or not verify_password(form_data.password, user.hashed_password):
@@ -22,8 +21,8 @@ def login(
             f"Fallo de login para usuario: {form_data.username}",
             extra={
                 "event_type": "AUTH_FAILED",
-                "request_id": request.state.request_id,
-                "ip_address": request.state.client_ip,
+                "request_id": getattr(request.state, "request_id", None),
+                "ip_address": getattr(request.state, "client_ip", None),
                 "metadata": {"username_attempted": form_data.username}
             }
         )
@@ -33,15 +32,30 @@ def login(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    # Si todo está bien, generamos el JWT
+    if not user.is_active:
+        sec_logger.warning(
+            f"Intento de login en cuenta inactiva: {user.username}",
+            extra={
+                "event_type": "AUTH_BLOCKED_INACTIVE",
+                "request_id": getattr(request.state, "request_id", None),
+                "ip_address": getattr(request.state, "client_ip", None),
+                "actor_id": user.id,
+                "metadata": {"username": user.username}
+            }
+        )
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Esta cuenta se encuentra desactivada.",
+        )
+
     access_token = create_access_token(data={"sub": str(user.id), "role": user.role.value})
     
     sec_logger.info(
         f"Login exitoso para usuario: {user.id}",
         extra={
             "event_type": "AUTH_SUCCESS",
-            "request_id": request.state.request_id,
-            "ip_address": request.state.client_ip,
+            "request_id": getattr(request.state, "request_id", None),
+            "ip_address": getattr(request.state, "client_ip", None),
             "actor_id": user.id,
             "metadata": {"role": user.role.value}
         }

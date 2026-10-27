@@ -2,14 +2,28 @@ const API_URL = window.location.origin.includes('file://')
     ? 'http://127.0.0.1:8000' 
     : window.location.origin;
 let allAppointmentsCache = [];
-let currentUser = null; // { id, name, username, role }
-let currentWeekOffset = 0; // 0 = Esta semana, 1 = Próxima semana, etc.
+let currentUser = null;
+let currentWeekOffset = 0;
 let workingDaysConfig = {
     my_working_days: [0, 1, 2, 3, 4, 5],
     team_working_days: [0, 1, 2, 3, 4, 5]
 };
 
-// Formatea fecha local YYYY-MM-DD sin desfasaje UTC nocturno
+let shopPrices = {
+    price_corte: 15000,
+    price_corte_promo2x: 12000,
+    price_corte_vip: 10000,
+    price_barba: 10000,
+    price_corte_barba: 18000
+};
+
+let currentMetricsPeriod = 'month';
+let currentMetricsEmployeeId = '';
+let metricsBarbersLoaded = false;
+
+const CORTE_STEPS = [30, 35, 40, 45];
+const BARBA_STEPS = [10, 15, 20];
+
 function formatLocalDate(d) {
     const year = d.getFullYear();
     const month = String(d.getMonth() + 1).padStart(2, '0');
@@ -17,13 +31,34 @@ function formatLocalDate(d) {
     return `${year}-${month}-${day}`;
 }
 
+function formatARS(amount) {
+    return '$' + Number(amount || 0).toLocaleString('es-AR');
+}
+
+function formatCompactARS(amount) {
+    const n = Number(amount || 0);
+    if (n === 0) return '$0';
+    if (n >= 1000000) return '$' + (n / 1000000).toFixed(1).replace('.0', '') + 'M';
+    if (n >= 1000) return '$' + Math.round(n / 1000) + 'k';
+    return '$' + n;
+}
+
 document.addEventListener('DOMContentLoaded', async () => {
+    populateDurationSelects(30, 15);
+
+    document.getElementById('durCorte')?.addEventListener('change', updateCombinedDurationDisplay);
+    document.getElementById('durBarba')?.addEventListener('change', updateCombinedDurationDisplay);
+
+    document.getElementById('metricsBarberFilter')?.addEventListener('change', (e) => {
+        currentMetricsEmployeeId = e.target.value;
+        loadMetricsData();
+    });
+
     const token = localStorage.getItem('access_token');
     if (token) {
         await initSession(token);
     }
 
-    // Inicializar fecha mínima hoy en el selector de excepciones
     const excDateInput = document.getElementById('excDate');
     if (excDateInput) {
         const today = formatLocalDate(new Date());
@@ -31,15 +66,13 @@ document.addEventListener('DOMContentLoaded', async () => {
         excDateInput.value = today;
     }
 
-    // Filtro "Solo Hoy": si se activa, vuelve a la semana actual automáticamente
     document.getElementById('onlyTodayCheck')?.addEventListener('change', (e) => {
-        if (e.target.checked && currentWeekOffset !== 0) {
+        if (e.target.checked) {
             currentWeekOffset = 0;
         }
         renderAgenda(allAppointmentsCache);
     });
 
-    // Filtro "Mis Turnos" (Dueño)
     document.getElementById('onlyMineCheck')?.addEventListener('change', () => {
         renderAgenda(allAppointmentsCache);
     });
@@ -48,7 +81,10 @@ document.addEventListener('DOMContentLoaded', async () => {
 async function initSession(token) {
     const ok = await loadCurrentUser(token);
     if (!ok) return logout();
-    await loadWorkingDaysConfig(token);
+    await Promise.all([
+        loadWorkingDaysConfig(token),
+        loadServicePrices(token)
+    ]);
     showDashboard();
     await fetchAppointments(token);
 }
@@ -62,14 +98,31 @@ async function loadCurrentUser(token) {
 
         currentUser = await res.json();
 
-        const headerTitle = document.getElementById('headerTitle');
-        if (headerTitle && currentUser.name) {
-            headerTitle.textContent = currentUser.name.toUpperCase();
+        const userBadge = document.getElementById('loggedUserName');
+        if (userBadge && currentUser.name) {
+            userBadge.textContent = currentUser.name;
+            userBadge.style.display = 'inline-flex';
         }
 
+        const isOwner = String(currentUser.role || '').toLowerCase() === 'owner';
         const onlyMineControl = document.getElementById('onlyMineControl');
+        const onlyMineCheck = document.getElementById('onlyMineCheck');
+
         if (onlyMineControl) {
-            onlyMineControl.style.display = (currentUser.role === 'owner') ? 'inline-flex' : 'none';
+            if (isOwner) {
+                onlyMineControl.hidden = false;
+                onlyMineControl.style.setProperty('display', 'inline-flex', 'important');
+            } else {
+                onlyMineControl.hidden = true;
+                onlyMineControl.style.setProperty('display', 'none', 'important');
+            }
+        }
+        if (onlyMineCheck) {
+            onlyMineCheck.checked = false;
+        }
+
+        if (isOwner && !currentMetricsEmployeeId) {
+            currentMetricsEmployeeId = String(currentUser.id);
         }
 
         return true;
@@ -99,8 +152,6 @@ async function loadWorkingDaysConfig(token) {
 function getWeekDaysArray(weekOffset = 0) {
     const now = new Date();
     const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-
-    // Convertimos getDay() (0=Dom..6=Sáb) a formato (0=Lunes..6=Domingo)
     const currentDayIndex = (today.getDay() + 6) % 7;
 
     const monday = new Date(today);
@@ -113,29 +164,54 @@ function getWeekDaysArray(weekOffset = 0) {
         days.push({
             dateObj: d,
             dateStr: formatLocalDate(d),
-            dayOfWeek: i // 0 = Lunes ... 6 = Domingo
+            dayOfWeek: i
         });
     }
     return days;
 }
 
+function getActiveWorkingDays() {
+    const isOwner = currentUser && String(currentUser.role || '').toLowerCase() === 'owner';
+    const showAllShop = document.getElementById('onlyMineCheck')?.checked;
+    return (isOwner && showAllShop)
+        ? workingDaysConfig.team_working_days
+        : workingDaysConfig.my_working_days;
+}
+
+function getMinWeekOffset(activeWorkingDays, onlyToday) {
+    if (onlyToday) return 0;
+
+    const todayStr = formatLocalDate(new Date());
+    const currentWeekDays = getWeekDaysArray(0);
+
+    const hasRemainingWorkingDays = currentWeekDays.some(
+        d => d.dateStr >= todayStr && activeWorkingDays.includes(d.dayOfWeek)
+    );
+
+    return hasRemainingWorkingDays ? 0 : 1;
+}
+
 function changeWeek(delta) {
-    const nextOffset = currentWeekOffset + delta;
-    if (nextOffset < 0) return; // No permitir ir a semanas pasadas
-
-    currentWeekOffset = nextOffset;
-
-    // Si avanza de semana y tenía "Solo Hoy" marcado, lo destildamos
     const onlyTodayCheck = document.getElementById('onlyTodayCheck');
-    if (currentWeekOffset > 0 && onlyTodayCheck && onlyTodayCheck.checked) {
+    const activeWorkingDays = getActiveWorkingDays();
+
+    if (delta > 0 && onlyTodayCheck && onlyTodayCheck.checked) {
         onlyTodayCheck.checked = false;
     }
 
+    const minOffset = getMinWeekOffset(activeWorkingDays, onlyTodayCheck?.checked);
+    const nextOffset = currentWeekOffset + delta;
+
+    if (nextOffset < minOffset) return;
+
+    currentWeekOffset = nextOffset;
     renderAgenda(allAppointmentsCache);
 }
 
 function resetToCurrentWeek() {
-    currentWeekOffset = 0;
+    const onlyToday = document.getElementById('onlyTodayCheck')?.checked;
+    const activeWorkingDays = getActiveWorkingDays();
+    currentWeekOffset = getMinWeekOffset(activeWorkingDays, onlyToday);
     renderAgenda(allAppointmentsCache);
 }
 
@@ -186,15 +262,21 @@ function renderAgenda(appointments) {
     container.innerHTML = '';
 
     const onlyToday = document.getElementById('onlyTodayCheck')?.checked;
-    const onlyMine = document.getElementById('onlyMineCheck')?.checked;
+    const showAllShop = document.getElementById('onlyMineCheck')?.checked;
     const todayStr = formatLocalDate(new Date());
 
-    // 1. Obtener los 7 días (Lunes a Domingo) de la semana seleccionada
+    const isOwner = currentUser && String(currentUser.role || '').toLowerCase() === 'owner';
+    const activeWorkingDays = getActiveWorkingDays();
+
+    const minOffset = getMinWeekOffset(activeWorkingDays, onlyToday);
+    if (currentWeekOffset < minOffset) {
+        currentWeekOffset = minOffset;
+    }
+
     const weekDays = getWeekDaysArray(currentWeekOffset);
     const mondayObj = weekDays[0].dateObj;
     const sundayObj = weekDays[6].dateObj;
 
-    // 2. Actualizar subtítulo "SEMANA DEL DD/MM AL DD/MM" y estado de botones < >
     const formatShort = (d) => `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}`;
     const subtitleEl = document.getElementById('weekSubtitle');
     if (subtitleEl) {
@@ -202,23 +284,14 @@ function renderAgenda(appointments) {
     }
 
     const prevBtn = document.getElementById('prevWeekBtn');
-    if (prevBtn) prevBtn.disabled = (currentWeekOffset === 0);
+    if (prevBtn) prevBtn.disabled = (currentWeekOffset <= minOffset);
 
     const resetBtn = document.getElementById('resetWeekBtn');
     if (resetBtn) {
-        resetBtn.style.display = (currentWeekOffset > 0) ? 'inline-block' : 'none';
+        resetBtn.style.display = (currentWeekOffset > minOffset) ? 'inline-block' : 'none';
     }
 
-    // 3. Determinar qué días laborales corresponden a la vista actual:
-    // - Si es empleado, o si es el dueño con "Mis Turnos" activo -> usa my_working_days
-    // - Si es el dueño viendo a toda la barbería -> usa team_working_days
-    const isOwner = currentUser && currentUser.role === 'owner';
-    const activeWorkingDays = (isOwner && !onlyMine)
-        ? workingDaysConfig.team_working_days
-        : workingDaysConfig.my_working_days;
-
-    // 4. Agrupar turnos por fecha (aplicando filtro "Mis Turnos" si corresponde)
-    const filteredAppts = (onlyMine && currentUser)
+    const filteredAppts = (isOwner && !showAllShop && currentUser)
         ? appointments.filter(app => app.employee_id === currentUser.id)
         : appointments;
 
@@ -231,17 +304,11 @@ function renderAgenda(appointments) {
     const diasSemanaNombres = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo'];
     let visibleDaysCount = 0;
 
-    // 5. Recorrer la semana de Lunes (0) a Domingo (6)
     weekDays.forEach(dayInfo => {
         const { dateObj, dateStr, dayOfWeek } = dayInfo;
 
-        // A. No mostrar días pasados (ej. si hoy es miércoles, ignora lunes y martes)
         if (dateStr < todayStr) return;
-
-        // B. Si está tildado "Solo Hoy", mostrar únicamente hoy
         if (onlyToday && dateStr !== todayStr) return;
-
-        // C. No mostrar los días que no atiende el barbero (salvo que "Solo Hoy" esté marcado)
         if (!onlyToday && !activeWorkingDays.includes(dayOfWeek)) return;
 
         visibleDaysCount++;
@@ -263,15 +330,58 @@ function renderAgenda(appointments) {
             `;
         } else {
             dayApps.forEach(app => {
-                let [h, m] = app.time.split(':').map(Number);
-                let endM = m + 45;
-                let endH = h;
-                if (endM >= 60) { endM -= 60; endH += 1; }
-                let endTime = `${endH.toString().padStart(2, '0')}:${endM.toString().padStart(2, '0')}`;
+                const [h, m] = app.time.split(':').map(Number);
+                const durationMin = app.duration || 30;
+                const totalEndMinutes = (h * 60) + m + durationMin;
+                const endH = Math.floor(totalEndMinutes / 60) % 24;
+                const endM = totalEndMinutes % 60;
+                const endTime = `${String(endH).padStart(2, '0')}:${String(endM).padStart(2, '0')}`;
 
                 const barberBadge = (isOwner && app.employee_name)
                     ? `<span class="barber-tag">${app.employee_name}</span>`
                     : '';
+
+                const currentPrice = app.price ?? shopPrices.price_corte;
+                const isCorte = app.service === 'Corte';
+                const isPromo2x = isCorte && currentPrice === shopPrices.price_corte_promo2x;
+                const isVip = isCorte && currentPrice === shopPrices.price_corte_vip;
+                const isNormal = !isPromo2x && !isVip;
+
+                // Color y etiqueta del badge de precio según la tarifa activa
+                let priceTierClass = '';
+                let tierSuffix = '';
+                if (isPromo2x) {
+                    priceTierClass = 'price-tag-promo';
+                    tierSuffix = ' · 2x';
+                } else if (isVip) {
+                    priceTierClass = 'price-tag-vip';
+                    tierSuffix = ' · VIP';
+                }
+
+                // Si es "Corte", el precio es clickeable para desplegar las opciones
+                const priceBadgeHtml = isCorte
+                    ? `<button type="button" class="price-tag clickable ${priceTierClass}" onclick="toggleTariffMenu(${app.id})" title="Cambiar tarifa">
+                           ${formatARS(currentPrice)}${tierSuffix} <span class="price-caret">▾</span>
+                       </button>`
+                    : `<span class="price-tag">${formatARS(currentPrice)}</span>`;
+
+                // Menú oculto por defecto; se abre solo al tocar el precio
+                const tariffButtonsHtml = isCorte ? `
+                    <div id="tariff-pills-${app.id}" class="tariff-pills" style="display: none;">
+                        <button type="button" class="tariff-btn ${isNormal ? 'active' : ''}"
+                            onclick="cambiarTarifaTurno(${app.id}, 'normal')">
+                            Normal ${formatCompactARS(shopPrices.price_corte)}
+                        </button>
+                        <button type="button" class="tariff-btn ${isPromo2x ? 'active-promo' : ''}"
+                            onclick="cambiarTarifaTurno(${app.id}, 'promo2x')">
+                            Promo 2x ${formatCompactARS(shopPrices.price_corte_promo2x)}
+                        </button>
+                        <button type="button" class="tariff-btn ${isVip ? 'active-vip' : ''}"
+                            onclick="cambiarTarifaTurno(${app.id}, 'vip')">
+                            VIP ${formatCompactARS(shopPrices.price_corte_vip)}
+                        </button>
+                    </div>
+                ` : '';
 
                 dayHtml += `
                     <div class="appointment-item">
@@ -280,8 +390,10 @@ function renderAgenda(appointments) {
                             <div class="name">${app.client_name}</div>
                             <div class="service-meta">
                                 <span class="service">${app.service}</span>
+                                ${priceBadgeHtml}
                                 ${barberBadge}
                             </div>
+                            ${tariffButtonsHtml}
                         </div>
                         <div class="appt-actions">
                             <button class="btn-wpp" onclick="abrirWpp('${app.client_phone}')">WhatsApp</button>
@@ -299,7 +411,51 @@ function renderAgenda(appointments) {
     });
 
     if (visibleDaysCount === 0) {
-        container.innerHTML = '<p style="color:#64748b; text-align:center; padding: 20px 0;">No quedan días laborables en esta semana. Usá la flecha (›) para ver la próxima semana.</p>';
+        container.innerHTML = '<p style="color:#64748b; text-align:center; padding: 20px 0;">No hay días laborables configurados para mostrar.</p>';
+    }
+}
+
+function toggleTariffMenu(appointmentId) {
+    const targetMenu = document.getElementById(`tariff-pills-${appointmentId}`);
+    if (!targetMenu) return;
+
+    const isHidden = targetMenu.style.display === 'none';
+
+    // Cierra cualquier otro menú de tarifa que haya quedado abierto
+    document.querySelectorAll('.tariff-pills').forEach(el => {
+        el.style.display = 'none';
+    });
+
+    targetMenu.style.display = isHidden ? 'flex' : 'none';
+}
+
+async function cambiarTarifaTurno(appointmentId, tier) {
+    const token = localStorage.getItem('access_token');
+    if (!token) return;
+
+    try {
+        const res = await fetch(`${API_URL}/admin/appointments/${appointmentId}/price`, {
+            method: 'PATCH',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`
+            },
+            body: JSON.stringify({ tier })
+        });
+
+        if (res.ok) {
+            const updatedAppt = await res.json();
+            const idx = allAppointmentsCache.findIndex(a => a.id === appointmentId);
+            if (idx !== -1) {
+                allAppointmentsCache[idx].price = updatedAppt.price;
+            }
+            renderAgenda(allAppointmentsCache);
+        } else {
+            const err = await res.json();
+            alert(err.detail || 'No se pudo actualizar la tarifa del turno.');
+        }
+    } catch (e) {
+        alert('Error de conexión al actualizar el precio.');
     }
 }
 
@@ -326,10 +482,17 @@ async function cancelarTurno(id) {
     }
 }
 
-function showDashboard() {
+function hideAllSections() {
     document.getElementById('loginSection').style.display = 'none';
+    document.getElementById('dashboardSection').style.display = 'none';
+    document.getElementById('servicesSection').style.display = 'none';
     document.getElementById('scheduleSection').style.display = 'none';
     document.getElementById('exceptionsSection').style.display = 'none';
+    document.getElementById('metricsSection').style.display = 'none';
+}
+
+function showDashboard() {
+    hideAllSections();
     document.getElementById('dashboardSection').style.display = 'block';
     document.getElementById('logoutBtn').style.display = 'block';
     if (allAppointmentsCache.length >= 0 && currentUser) {
@@ -342,6 +505,394 @@ function logout() {
     currentUser = null;
     window.location.reload();
 }
+
+// ==========================================
+// VISTA MÉTRICAS Y FACTURACIÓN
+// ==========================================
+
+async function showMetrics() {
+    hideAllSections();
+    document.getElementById('metricsSection').style.display = 'block';
+
+    const token = localStorage.getItem('access_token');
+    if (!currentUser && token) {
+        await loadCurrentUser(token);
+    }
+
+    const isOwner = currentUser && String(currentUser.role || '').toLowerCase() === 'owner';
+    const barberSelect = document.getElementById('metricsBarberFilter');
+
+    if (barberSelect) {
+        barberSelect.style.display = isOwner ? 'inline-block' : 'none';
+    }
+
+    if (isOwner && !metricsBarbersLoaded) {
+        loadBarbersForMetricsFilter();
+    }
+
+    await loadMetricsData();
+}
+
+function loadBarbersForMetricsFilter() {
+    const barberSelect = document.getElementById('metricsBarberFilter');
+    if (!barberSelect || !currentUser) return;
+
+    barberSelect.innerHTML = '';
+
+    // 1. Por defecto: únicamente las métricas propias del dueño (Maxi)
+    const ownerOpt = document.createElement('option');
+    ownerOpt.value = String(currentUser.id);
+    ownerOpt.textContent = `💈 ${currentUser.name} (Mis Métricas)`;
+    barberSelect.appendChild(ownerOpt);
+
+    // 2. Opción global de todo el local (sin desglose individual de empleados)
+    const allOpt = document.createElement('option');
+    allOpt.value = 'all';
+    allOpt.textContent = '🏢 Todo el Local';
+    barberSelect.appendChild(allOpt);
+
+    if (!currentMetricsEmployeeId) {
+        currentMetricsEmployeeId = String(currentUser.id);
+    }
+    barberSelect.value = currentMetricsEmployeeId;
+    metricsBarbersLoaded = true;
+}
+
+function changeMetricsPeriod(period) {
+    currentMetricsPeriod = period;
+    document.querySelectorAll('.period-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.period === period);
+    });
+    loadMetricsData();
+}
+
+async function loadMetricsData() {
+    const token = localStorage.getItem('access_token');
+    if (!token) return;
+
+    const isOwner = currentUser && String(currentUser.role || '').toLowerCase() === 'owner';
+    const params = new URLSearchParams({ period: currentMetricsPeriod });
+
+    // Si es dueño y eligió sus propias métricas, envía su ID; si eligió 'all', pide Todo el Local
+    if (isOwner && currentMetricsEmployeeId && currentMetricsEmployeeId !== 'all') {
+        params.append('employee_id', currentMetricsEmployeeId);
+    }
+
+    try {
+        const res = await fetch(`${API_URL}/admin/metrics?${params.toString()}`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+
+        if (res.status === 401) return logout();
+        if (!res.ok) {
+            console.error("Error obteniendo métricas:", res.status);
+            return;
+        }
+
+        const data = await res.json();
+        renderMetricsDashboard(data);
+    } catch (err) {
+        console.error("Error de conexión al cargar métricas:", err);
+    }
+}
+
+function renderMetricsDashboard(data) {
+    const formatDateDMY = (isoStr) => {
+        const [y, m, d] = isoStr.split('-');
+        return `${d}/${m}/${y}`;
+    };
+
+    const rangeEl = document.getElementById('metricsDateRange');
+    if (rangeEl) {
+        rangeEl.textContent = (data.start_date === data.end_date)
+            ? `HOY (${formatDateDMY(data.start_date)})`
+            : `DEL ${formatDateDMY(data.start_date)} AL ${formatDateDMY(data.end_date)}`;
+    }
+
+    document.getElementById('kpiTotalRevenue').textContent = formatARS(data.total_revenue);
+    document.getElementById('kpiRealRevenue').textContent = `Cobrado: ${formatARS(data.real_revenue)}`;
+    document.getElementById('kpiPendingRevenue').textContent = `En agenda: ${formatARS(data.pending_revenue)}`;
+
+    document.getElementById('kpiTotalAppts').textContent = data.total_appointments;
+    document.getElementById('kpiApptsDetail').textContent =
+        `${data.completed_appointments} completados · ${data.pending_appointments} pendientes`;
+
+    renderRevenueBarChart(data.chart_series || []);
+    renderDonutCharts(data);
+}
+
+function renderRevenueBarChart(series) {
+    const container = document.getElementById('revenueBarChart');
+    if (!container) return;
+
+    if (!series.length) {
+        container.innerHTML = '<p class="empty-exceptions">Sin datos para graficar en este período.</p>';
+        return;
+    }
+
+    const maxRevenue = Math.max(...series.map(item => item.total_revenue), 1);
+
+    container.innerHTML = series.map(item => {
+        const totalPct = item.total_revenue > 0
+            ? Math.max(Math.round((item.total_revenue / maxRevenue) * 100), 8)
+            : 0;
+        const realSharePct = item.total_revenue > 0
+            ? Math.round((item.real_revenue / item.total_revenue) * 100)
+            : 0;
+        const pendingSharePct = 100 - realSharePct;
+
+        return `
+            <div class="bar-col">
+                <div class="bar-top-value">${formatCompactARS(item.total_revenue)}</div>
+                <div class="bar-track-vertical">
+                    <div class="bar-stack" style="height: ${totalPct}%;">
+                        <div class="bar-segment-pending" style="height: ${pendingSharePct}%;" title="En agenda: ${formatARS(item.pending_revenue)}"></div>
+                        <div class="bar-segment-real" style="height: ${realSharePct}%;" title="Cobrado: ${formatARS(item.real_revenue)}"></div>
+                    </div>
+                </div>
+                <div class="bar-bottom-label">${item.label}</div>
+                <div class="bar-bottom-sub">${item.appointments} t.</div>
+            </div>
+        `;
+    }).join('');
+}
+
+function renderDonutCharts(data) {
+    const container = document.getElementById('donutsContainer');
+    if (!container) return;
+
+    const revPct = data.total_revenue > 0
+        ? Math.round((data.real_revenue / data.total_revenue) * 100)
+        : 0;
+
+    const apptPct = data.total_appointments > 0
+        ? Math.round((data.completed_appointments / data.total_appointments) * 100)
+        : 0;
+
+    container.innerHTML = `
+        <div class="donut-box">
+            <svg viewBox="0 0 36 36" class="donut-svg">
+                <path class="donut-ring"
+                    d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
+                <path class="donut-segment-emerald"
+                    stroke-dasharray="${revPct}, 100"
+                    d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
+                <text x="18" y="20.5" class="donut-center-text">${revPct}%</text>
+            </svg>
+            <div class="donut-info">
+                <span class="donut-title">Caja Cobrada</span>
+                <span class="donut-sub">${formatARS(data.real_revenue)} de ${formatARS(data.total_revenue)}</span>
+            </div>
+        </div>
+
+        <div class="donut-box">
+            <svg viewBox="0 0 36 36" class="donut-svg">
+                <path class="donut-ring"
+                    d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
+                <path class="donut-segment-violet"
+                    stroke-dasharray="${apptPct}, 100"
+                    d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
+                <text x="18" y="20.5" class="donut-center-text">${apptPct}%</text>
+            </svg>
+            <div class="donut-info">
+                <span class="donut-title">Turnos Completados</span>
+                <span class="donut-sub">${data.completed_appointments} de ${data.total_appointments} turnos</span>
+            </div>
+        </div>
+    `;
+}
+
+// ==========================================
+// VISTA SERVICIOS (PRECIOS DUEÑO + DURACIONES DE CADA BARBERO)
+// ==========================================
+
+function updateCombinedDurationDisplay() {
+    const corteVal = parseInt(document.getElementById('durCorte')?.value, 10) || 30;
+    const barbaVal = parseInt(document.getElementById('durBarba')?.value, 10) || 15;
+    const combinedEl = document.getElementById('durCorteBarba');
+
+    if (combinedEl) {
+        const total = corteVal + barbaVal;
+        combinedEl.value = `${total} min`;
+        combinedEl.dataset.minutes = total;
+    }
+}
+
+function populateDurationSelects(corte = 30, barba = 15) {
+    const buildOpts = (steps, selectedVal) => {
+        const safeVal = steps.includes(Number(selectedVal)) ? Number(selectedVal) : steps[0];
+        return steps.map(min =>
+            `<option value="${min}" ${min === safeVal ? 'selected' : ''}>${min} min</option>`
+        ).join('');
+    };
+
+    const corteEl = document.getElementById('durCorte');
+    const barbaEl = document.getElementById('durBarba');
+
+    if (corteEl) corteEl.innerHTML = buildOpts(CORTE_STEPS, corte);
+    if (barbaEl) barbaEl.innerHTML = buildOpts(BARBA_STEPS, barba);
+
+    updateCombinedDurationDisplay();
+}
+
+async function showServices() {
+    hideAllSections();
+    document.getElementById('servicesSection').style.display = 'block';
+
+    const token = localStorage.getItem('access_token');
+    if (!currentUser && token) {
+        await loadCurrentUser(token);
+    }
+
+    const isOwner = currentUser && String(currentUser.role || '').toLowerCase() === 'owner';
+    const ownerPricesCard = document.getElementById('ownerPricesCard');
+    const empNavPills = document.getElementById('empServicesNavPills');
+
+    if (ownerPricesCard) {
+        ownerPricesCard.style.display = isOwner ? 'block' : 'none';
+    }
+    if (empNavPills) {
+        empNavPills.style.display = isOwner ? 'none' : 'flex';
+    }
+
+    await loadServiceDurations(token);
+    await loadServicePrices(token);
+}
+
+async function loadServiceDurations(token) {
+    try {
+        const res = await fetch(`${API_URL}/admin/service-durations`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (res.ok) {
+            const data = await res.json();
+            populateDurationSelects(data.duration_corte, data.duration_barba);
+            return;
+        }
+    } catch (err) {
+        console.error("Error al cargar duraciones de servicios:", err);
+    }
+    populateDurationSelects(
+        currentUser?.duration_corte || 30,
+        currentUser?.duration_barba || 15
+    );
+}
+
+async function loadServicePrices(token) {
+    try {
+        const res = await fetch(`${API_URL}/admin/service-prices`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (res.ok) {
+            const data = await res.json();
+            shopPrices = {
+                price_corte: data.price_corte ?? 15000,
+                price_corte_promo2x: data.price_corte_promo2x ?? 12000,
+                price_corte_vip: data.price_corte_vip ?? 10000,
+                price_barba: data.price_barba ?? 10000,
+                price_corte_barba: data.price_corte_barba ?? 18000
+            };
+
+            const elCorte = document.getElementById('priceCorte');
+            const elPromo2x = document.getElementById('priceCortePromo2x');
+            const elVip = document.getElementById('priceCorteVip');
+            const elBarba = document.getElementById('priceBarba');
+            const elCorteBarba = document.getElementById('priceCorteBarba');
+
+            if (elCorte) elCorte.value = shopPrices.price_corte;
+            if (elPromo2x) elPromo2x.value = shopPrices.price_corte_promo2x;
+            if (elVip) elVip.value = shopPrices.price_corte_vip;
+            if (elBarba) elBarba.value = shopPrices.price_barba;
+            if (elCorteBarba) elCorteBarba.value = shopPrices.price_corte_barba;
+        }
+    } catch (err) {
+        console.error("Error al cargar precios:", err);
+    }
+}
+
+document.getElementById('pricesForm')?.addEventListener('submit', async function (e) {
+    e.preventDefault();
+
+    const payload = {
+        price_corte: parseInt(document.getElementById('priceCorte').value, 10) || 0,
+        price_corte_promo2x: parseInt(document.getElementById('priceCortePromo2x').value, 10) || 0,
+        price_corte_vip: parseInt(document.getElementById('priceCorteVip').value, 10) || 0,
+        price_barba: parseInt(document.getElementById('priceBarba').value, 10) || 0,
+        price_corte_barba: parseInt(document.getElementById('priceCorteBarba').value, 10) || 0
+    };
+
+    const token = localStorage.getItem('access_token');
+
+    try {
+        const response = await fetch(`${API_URL}/admin/service-prices`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`
+            },
+            body: JSON.stringify(payload)
+        });
+
+        if (response.ok) {
+            const updated = await response.json();
+            shopPrices = {
+                price_corte: updated.price_corte,
+                price_corte_promo2x: updated.price_corte_promo2x,
+                price_corte_vip: updated.price_corte_vip,
+                price_barba: updated.price_barba,
+                price_corte_barba: updated.price_corte_barba
+            };
+            alert('Precios y promociones actualizados correctamente');
+        } else {
+            const error = await response.json();
+            alert('Error al guardar precios: ' + (error.detail || JSON.stringify(error)));
+        }
+    } catch (err) {
+        alert('Error de conexión con el servidor.');
+    }
+});
+
+document.getElementById('durationsForm')?.addEventListener('submit', async function (e) {
+    e.preventDefault();
+
+    const corteMin = parseInt(document.getElementById('durCorte').value, 10);
+    const barbaMin = parseInt(document.getElementById('durBarba').value, 10);
+
+    const payload = {
+        duration_corte: corteMin,
+        duration_barba: barbaMin,
+        duration_corte_barba: corteMin + barbaMin
+    };
+
+    const token = localStorage.getItem('access_token');
+
+    try {
+        const response = await fetch(`${API_URL}/admin/service-durations`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`
+            },
+            body: JSON.stringify(payload)
+        });
+
+        if (response.ok) {
+            const updated = await response.json();
+            if (currentUser) {
+                currentUser.duration_corte = updated.duration_corte;
+                currentUser.duration_barba = updated.duration_barba;
+                currentUser.duration_corte_barba = updated.duration_corte_barba;
+            }
+            updateCombinedDurationDisplay();
+            alert('Duraciones guardadas correctamente');
+        } else {
+            const error = await response.json();
+            alert('Error al guardar duraciones: ' + (error.detail || JSON.stringify(error)));
+        }
+    } catch (err) {
+        alert('Error de conexión con el servidor.');
+    }
+});
 
 // ==========================================
 // GESTIÓN DE HORARIO HABITUAL
@@ -427,8 +978,7 @@ function renderScheduleForm() {
 }
 
 async function showSchedule() {
-    document.getElementById('dashboardSection').style.display = 'none';
-    document.getElementById('exceptionsSection').style.display = 'none';
+    hideAllSections();
     document.getElementById('scheduleSection').style.display = 'block';
 
     renderScheduleForm();
@@ -503,7 +1053,7 @@ document.getElementById('scheduleForm').addEventListener('submit', async functio
         });
 
         if (response.ok) {
-            await loadWorkingDaysConfig(token); // Refrescamos los días activos en vivo
+            await loadWorkingDaysConfig(token);
             alert('Horarios guardados correctamente');
         } else {
             const error = await response.json();
@@ -519,8 +1069,7 @@ document.getElementById('scheduleForm').addEventListener('submit', async functio
 // ==========================================
 
 async function showExceptions() {
-    document.getElementById('dashboardSection').style.display = 'none';
-    document.getElementById('scheduleSection').style.display = 'none';
+    hideAllSections();
     document.getElementById('exceptionsSection').style.display = 'block';
 
     if (!currentUser) {
@@ -528,10 +1077,11 @@ async function showExceptions() {
         if (token) await loadCurrentUser(token);
     }
 
+    const isOwner = currentUser && String(currentUser.role || '').toLowerCase() === 'owner';
     const globalWrapper = document.getElementById('globalExceptionWrapper');
     const globalCheck = document.getElementById('excGlobal');
     if (globalWrapper && globalCheck) {
-        if (currentUser && currentUser.role === 'owner') {
+        if (isOwner) {
             globalWrapper.style.display = 'block';
         } else {
             globalWrapper.style.display = 'none';
@@ -597,7 +1147,8 @@ document.getElementById('exceptionForm').addEventListener('submit', async functi
     const date = document.getElementById('excDate').value;
     const start_time = document.getElementById('excStart').value || null;
     const end_time = document.getElementById('excEnd').value || null;
-    const is_global = (currentUser && currentUser.role === 'owner')
+    const isOwner = currentUser && String(currentUser.role || '').toLowerCase() === 'owner';
+    const is_global = isOwner
         ? (document.getElementById('excGlobal')?.checked || false)
         : false;
 

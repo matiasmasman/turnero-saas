@@ -1,9 +1,9 @@
+import random
 import traceback
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
-from sqlalchemy import or_
-from typing import List, Optional
-from datetime import datetime, timedelta, date, time
+from typing import List, Optional, Tuple
+from datetime import datetime, date, time
 
 from app.database import get_db
 from app.models import Appointment, User, UserRole, WorkingHours, ScheduleException
@@ -11,10 +11,6 @@ from app.schemas import AppointmentCreate, AppointmentResponse
 from app.core.telemetry import sec_logger
 
 router = APIRouter(prefix="/appointments", tags=["Turnos Públicos"])
-
-# ==========================================
-# FUNCIONES AUXILIARES DE HORARIOS Y BLOQUEOS
-# ==========================================
 
 def parse_time(t) -> Optional[time]:
     if not t:
@@ -26,48 +22,44 @@ def parse_time(t) -> Optional[time]:
             return datetime.strptime(t, "%H:%M").time()
     return t
 
-def generate_slots(start_time, end_time) -> List[time]:
-    slots = []
-    s_time = parse_time(start_time)
-    e_time = parse_time(end_time)
-    if not s_time or not e_time:
-        return slots
-    
-    current = datetime.combine(date.today(), s_time)
-    end = datetime.combine(date.today(), e_time)
-    
-    while current < end:
-        slots.append(current.time())
-        current += timedelta(minutes=45)
-    return slots
-
 def to_minutes(t: time) -> int:
-    """Convierte un objeto time a minutos desde las 00:00 para evaluar solapamientos."""
     return t.hour * 60 + t.minute
+
+def minutes_to_time(mins: int) -> time:
+    return time(hour=mins // 60, minute=mins % 60)
+
+def get_service_duration(barber: User, service_name: str) -> int:
+    normalized = (service_name or "Corte").strip()
+    if normalized == "Barba":
+        return getattr(barber, "duration_barba", 15) or 15
+    elif normalized == "Corte + Barba":
+        return getattr(barber, "duration_corte_barba", 45) or 45
+    return getattr(barber, "duration_corte", 30) or 30
+
+def get_service_price(owner: Optional[User], service_name: str) -> int:
+    normalized = (service_name or "Corte").strip()
+    if normalized == "Barba":
+        return getattr(owner, "price_barba", 10000) if owner else 10000
+    elif normalized == "Corte + Barba":
+        return getattr(owner, "price_corte_barba", 18000) if owner else 18000
+    return getattr(owner, "price_corte", 15000) if owner else 15000
 
 def get_barber_block_reason(
     exceptions: List[ScheduleException],
     employee_id: int,
     slot_time: time,
-    duration_min: int = 45
+    duration_min: int = 30
 ) -> Optional[str]:
-    """
-    Evalúa si un barbero está bloqueado en ese horario (por excepción propia o feriado general).
-    Devuelve el motivo si está bloqueado, o None si está disponible.
-    """
     slot_start = to_minutes(slot_time)
     slot_end = slot_start + duration_min
 
     for exc in exceptions:
-        # Aplica si es un Feriado General (None) o una excepción de este barbero
         if exc.employee_id is not None and exc.employee_id != employee_id:
             continue
 
-        # 1. Bloqueo de día completo (sin hora de inicio/fin)
         if not exc.start_time or not exc.end_time:
             return exc.reason
 
-        # 2. Bloqueo de franja horaria parcial (verifica si se pisa con los 45 min del turno)
         exc_start_obj = parse_time(exc.start_time)
         exc_end_obj = parse_time(exc.end_time)
         if exc_start_obj and exc_end_obj:
@@ -79,34 +71,179 @@ def get_barber_block_reason(
 
     return None
 
+def has_appointment_overlap(
+    appointments: List[Appointment],
+    slot_time: time,
+    duration_min: int
+) -> bool:
+    slot_start = to_minutes(slot_time)
+    slot_end = slot_start + duration_min
+
+    for appt in appointments:
+        appt_t = parse_time(appt.time)
+        if not appt_t:
+            continue
+        appt_start = to_minutes(appt_t)
+        appt_dur = getattr(appt, "duration", 30) or 30
+        appt_end = appt_start + appt_dur
+
+        if slot_start < exc_end if False else (slot_start < appt_end and slot_end > appt_start):
+            return True
+
+    return False
+
+def fits_in_working_shifts(
+    schedule: Optional[WorkingHours],
+    slot_time: time,
+    duration_min: int
+) -> bool:
+    if not schedule or not schedule.is_working:
+        return False
+
+    slot_start = to_minutes(slot_time)
+    slot_end = slot_start + duration_min
+
+    for s_start_raw, s_end_raw in [
+        (schedule.shift1_start, schedule.shift1_end),
+        (schedule.shift2_start, schedule.shift2_end)
+    ]:
+        s_start = parse_time(s_start_raw)
+        s_end = parse_time(s_end_raw)
+        if s_start and s_end:
+            if to_minutes(s_start) <= slot_start and slot_end <= to_minutes(s_end):
+                return True
+
+    return False
+
+def generate_smart_slots_for_shift(
+    shift_start_raw,
+    shift_end_raw,
+    duration_min: int,
+    barber_id: int,
+    exceptions: List[ScheduleException],
+    barber_appointments: List[Appointment]
+) -> List[time]:
+    s_time = parse_time(shift_start_raw)
+    e_time = parse_time(shift_end_raw)
+    if not s_time or not e_time or duration_min <= 0:
+        return []
+
+    cursor = to_minutes(s_time)
+    end_min = to_minutes(e_time)
+
+    blockers: List[Tuple[int, int]] = []
+
+    for exc in exceptions:
+        if exc.employee_id is not None and exc.employee_id != barber_id:
+            continue
+        if not exc.start_time or not exc.end_time:
+            return []
+        exc_s = parse_time(exc.start_time)
+        exc_e = parse_time(exc.end_time)
+        if exc_s and exc_e:
+            blockers.append((to_minutes(exc_s), to_minutes(exc_e)))
+
+    for appt in barber_appointments:
+        appt_t = parse_time(appt.time)
+        if appt_t:
+            a_start = to_minutes(appt_t)
+            a_dur = getattr(appt, "duration", 30) or 30
+            blockers.append((a_start, a_start + a_dur))
+
+    valid_slots: List[time] = []
+
+    while cursor + duration_min <= end_min:
+        slot_end = cursor + duration_min
+        overlapping_ends = [
+            b_end for (b_start, b_end) in blockers
+            if cursor < b_end and slot_end > b_start
+        ]
+
+        if overlapping_ends:
+            next_free = max(overlapping_ends)
+            cursor = max(cursor + 5, next_free)
+        else:
+            valid_slots.append(minutes_to_time(cursor))
+            cursor += duration_min
+
+    return valid_slots
+
+def get_barber_available_slots(
+    barber: User,
+    schedule: Optional[WorkingHours],
+    service_name: str,
+    exceptions: List[ScheduleException],
+    barber_appointments: List[Appointment]
+) -> List[time]:
+    if not schedule or not schedule.is_working:
+        return []
+
+    duration_min = get_service_duration(barber, service_name)
+    slots: List[time] = []
+
+    if schedule.shift1_start and schedule.shift1_end:
+        slots.extend(generate_smart_slots_for_shift(
+            schedule.shift1_start,
+            schedule.shift1_end,
+            duration_min,
+            barber.id,
+            exceptions,
+            barber_appointments
+        ))
+
+    if schedule.shift2_start and schedule.shift2_end:
+        slots.extend(generate_smart_slots_for_shift(
+            schedule.shift2_start,
+            schedule.shift2_end,
+            duration_min,
+            barber.id,
+            exceptions,
+            barber_appointments
+        ))
+
+    return slots
 
 # ==========================================
 # ENDPOINTS PÚBLICOS
 # ==========================================
 
-# 1. RUTA PARA LLENAR EL COMBO DE BARBEROS
+@router.get("/services")
+def get_public_services(db: Session = Depends(get_db)):
+    owner = db.query(User).filter(User.role == UserRole.OWNER).first()
+    return {
+        "price_corte": getattr(owner, "price_corte", 15000) if owner else 15000,
+        "price_barba": getattr(owner, "price_barba", 10000) if owner else 10000,
+        "price_corte_barba": getattr(owner, "price_corte_barba", 18000) if owner else 18000
+    }
+
 @router.get("/barbers")
 def get_public_barbers(db: Session = Depends(get_db)):
-    # Trae tanto al dueño como a los empleados activos
     barbers = db.query(User).filter(
         User.role.in_([UserRole.EMPLOYEE, UserRole.OWNER]), 
         User.is_active == True
     ).all()
     
-    return [{"id": b.id, "name": b.name} for b in barbers]
+    return [
+        {
+            "id": b.id,
+            "name": b.name,
+            "duration_corte": b.duration_corte,
+            "duration_barba": b.duration_barba,
+            "duration_corte_barba": b.duration_corte_barba
+        }
+        for b in barbers
+    ]
 
-
-# 2. RUTA PARA OBTENER LOS HORARIOS DISPONIBLES
 @router.get("/available-slots")
 def get_available_slots(
-    target_date: date, 
-    employee_id: Optional[int] = None, 
+    target_date: date,
+    service: str = Query("Corte", description="Servicio seleccionado: Corte, Barba o Corte + Barba"),
+    employee_id: Optional[int] = None,
     db: Session = Depends(get_db)
 ):
     day_of_week = target_date.weekday()
-    target_date_str = target_date.isoformat()  # "YYYY-MM-DD" para comparar con String en SQLite
+    target_date_str = target_date.isoformat()
     
-    # 1. Buscamos TODOS los empleados activos
     all_active_employees = db.query(User).filter(
         User.role.in_([UserRole.EMPLOYEE, UserRole.OWNER]), 
         User.is_active == True
@@ -115,16 +252,21 @@ def get_available_slots(
     if not all_active_employees:
         return []
 
-    # Si el cliente eligió a uno en particular, filtramos. Si no, evaluamos a todos.
-    target_employees = [e for e in all_active_employees if e.id == employee_id] if employee_id else all_active_employees
+    target_employees = (
+        [e for e in all_active_employees if e.id == employee_id]
+        if employee_id
+        else all_active_employees
+    )
 
-    # Traemos de una sola vez todas las excepciones de esa fecha (globales y de empleados)
     date_exceptions = db.query(ScheduleException).filter(
         ScheduleException.date == target_date_str
     ).all()
 
-    # 2. Mapeamos qué horarios tiene CADA barbero
-    barber_availability = {}  # { 1: [10:00, 10:45], 2: [] }
+    day_appointments = db.query(Appointment).filter(
+        Appointment.date == target_date_str,
+        Appointment.status == "confirmed"
+    ).all()
+
     all_possible_slots = set()
 
     for emp in target_employees:
@@ -134,61 +276,29 @@ def get_available_slots(
             WorkingHours.is_working == True
         ).first()
 
-        emp_slots = []
-        if schedule:
-            if schedule.shift1_start and schedule.shift1_end:
-                emp_slots.extend(generate_slots(schedule.shift1_start, schedule.shift1_end))
-            if schedule.shift2_start and schedule.shift2_end:
-                emp_slots.extend(generate_slots(schedule.shift2_start, schedule.shift2_end))
-        
-        barber_availability[emp.id] = emp_slots
+        emp_appts = [a for a in day_appointments if a.employee_id == emp.id]
+        emp_slots = get_barber_available_slots(
+            emp,
+            schedule,
+            service,
+            date_exceptions,
+            emp_appts
+        )
         for s in emp_slots:
             all_possible_slots.add(s)
 
     now = datetime.now()
     is_today = target_date == date.today()
-    final_available_slots = []
     sorted_slots = sorted(list(all_possible_slots))
 
-    # 3. VERIFICACIÓN ESTRICTA: Por cada bloque horario posible
-    for slot in sorted_slots:
-        # Descartamos horarios pasados si la consulta es para hoy
-        if is_today and slot <= now.time():
-            continue
-
-        slot_str = slot.strftime("%H:%M:%S")
-        slot_short_str = slot.strftime("%H:%M")
-        can_be_booked = False
-
-        # Verificamos si AL MENOS UN barbero puede tomar este turno
-        for emp in target_employees:
-            # A. ¿Este barbero trabaja a esta hora según su horario habitual?
-            if slot not in barber_availability[emp.id]:
-                continue
-
-            # B. ¿Este barbero tiene un feriado o excepción en esta fecha/hora?
-            if get_barber_block_reason(date_exceptions, emp.id, slot) is not None:
-                continue
-
-            # C. ¿Este barbero ya tiene un turno reservado a esta hora?
-            is_busy = db.query(Appointment).filter(
-                Appointment.employee_id == emp.id,
-                Appointment.date == target_date_str,
-                Appointment.time.in_([slot_str, slot_short_str]),
-                Appointment.status == "confirmed"
-            ).first()
-            
-            if not is_busy:
-                can_be_booked = True
-                break  # Si encontramos a uno libre y sin excepción, habilitamos el horario
-
-        if can_be_booked:
-            final_available_slots.append(slot_short_str)
+    final_available_slots = [
+        slot.strftime("%H:%M")
+        for slot in sorted_slots
+        if not (is_today and slot <= now.time())
+    ]
 
     return final_available_slots
 
-
-# 3. RUTA PARA CREAR EL TURNO
 @router.post("/", response_model=AppointmentResponse, status_code=status.HTTP_201_CREATED)
 def create_appointment(
     appointment_data: AppointmentCreate, 
@@ -196,13 +306,13 @@ def create_appointment(
 ):
     try:
         assigned_employee_id = None
+        assigned_duration = 30
+
         target_time_str = appointment_data.time
         if len(target_time_str) == 5: 
             target_time_str = f"{target_time_str}:00"
-        target_time_short = target_time_str[:5]
         target_time_obj = parse_time(target_time_str)
 
-        # Convertimos la fecha a objeto date y normalizamos el string YYYY-MM-DD
         if isinstance(appointment_data.date, str):
             target_date_obj = datetime.strptime(appointment_data.date, "%Y-%m-%d").date()
         else:
@@ -211,18 +321,47 @@ def create_appointment(
         target_date_str = target_date_obj.isoformat()
         day_of_week = target_date_obj.weekday()
 
-        # Consultamos excepciones activas para ese día
         date_exceptions = db.query(ScheduleException).filter(
             ScheduleException.date == target_date_str
         ).all()
 
-        # CASO A: El cliente eligió un profesional específico
+        day_appointments = db.query(Appointment).filter(
+            Appointment.date == target_date_str,
+            Appointment.status == "confirmed"
+        ).all()
+
         if appointment_data.employee_id:
-            # 1. Verificar si tiene una excepción o feriado en ese horario
+            barber = db.query(User).filter(
+                User.id == appointment_data.employee_id,
+                User.role.in_([UserRole.EMPLOYEE, UserRole.OWNER]),
+                User.is_active == True
+            ).first()
+
+            if not barber:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="El profesional seleccionado no existe o no está activo."
+                )
+
+            service_duration = get_service_duration(barber, appointment_data.service)
+
+            schedule = db.query(WorkingHours).filter(
+                WorkingHours.employee_id == barber.id,
+                WorkingHours.day_of_week == day_of_week,
+                WorkingHours.is_working == True
+            ).first()
+
+            if not fits_in_working_shifts(schedule, target_time_obj, service_duration):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="El horario elegido excede la jornada laboral del profesional."
+                )
+
             block_reason = get_barber_block_reason(
                 date_exceptions,
-                appointment_data.employee_id,
-                target_time_obj
+                barber.id,
+                target_time_obj,
+                service_duration
             )
             if block_reason:
                 raise HTTPException(
@@ -230,30 +369,25 @@ def create_appointment(
                     detail=f"El profesional no está disponible en ese horario ({block_reason})."
                 )
 
-            # 2. Verificar si ya tiene un turno reservado
-            conflict = db.query(Appointment).filter(
-                Appointment.employee_id == appointment_data.employee_id,
-                Appointment.date == target_date_str,
-                Appointment.time.in_([target_time_str, target_time_short]),
-                Appointment.status == "confirmed"
-            ).first()
-
-            if conflict:
+            emp_appts = [a for a in day_appointments if a.employee_id == barber.id]
+            if has_appointment_overlap(emp_appts, target_time_obj, service_duration):
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST, 
                     detail="El profesional seleccionado ya tiene ese horario ocupado."
                 )
-            assigned_employee_id = appointment_data.employee_id
 
-        # CASO B: El cliente eligió "Cualquier barbero disponible"
+            assigned_employee_id = barber.id
+            assigned_duration = service_duration
+
         else:
             all_active_employees = db.query(User).filter(
                 User.role.in_([UserRole.EMPLOYEE, UserRole.OWNER]), 
                 User.is_active == True
             ).all()
             
+            candidates: List[Tuple[User, int]] = []
+
             for emp in all_active_employees:
-                # 1. ¿Trabaja este día de la semana?
                 schedule = db.query(WorkingHours).filter(
                     WorkingHours.employee_id == emp.id,
                     WorkingHours.day_of_week == day_of_week,
@@ -261,40 +395,38 @@ def create_appointment(
                 ).first()
                 
                 if not schedule:
-                    continue 
-
-                # 2. ¿El horario cae dentro de sus turnos laborales?
-                emp_slots_objs = []
-                if schedule.shift1_start and schedule.shift1_end:
-                    emp_slots_objs.extend(generate_slots(schedule.shift1_start, schedule.shift1_end))
-                if schedule.shift2_start and schedule.shift2_end:
-                    emp_slots_objs.extend(generate_slots(schedule.shift2_start, schedule.shift2_end))
-                
-                emp_slots_strs = [s.strftime("%H:%M:%S") for s in emp_slots_objs]
-                if target_time_str not in emp_slots_strs:
                     continue
 
-                # 3. ¿Tiene un bloqueo o excepción en esta fecha/hora?
-                if get_barber_block_reason(date_exceptions, emp.id, target_time_obj) is not None:
-                    continue
+                emp_appts = [a for a in day_appointments if a.employee_id == emp.id]
+                valid_slots = get_barber_available_slots(
+                    emp,
+                    schedule,
+                    appointment_data.service,
+                    date_exceptions,
+                    emp_appts
+                )
 
-                # 4. ¿Ya tiene un turno asignado a esta hora?
-                is_busy = db.query(Appointment).filter(
-                    Appointment.employee_id == emp.id,
-                    Appointment.date == target_date_str,
-                    Appointment.time.in_([target_time_str, target_time_short]),
-                    Appointment.status == "confirmed"
-                ).first()
+                if target_time_obj in valid_slots:
+                    # Guardamos al barbero disponible y cuántos turnos ya tiene asignados en ese día
+                    candidates.append((emp, len(emp_appts)))
 
-                if not is_busy:
-                    assigned_employee_id = emp.id
-                    break 
-
-            if not assigned_employee_id:
+            if not candidates:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST, 
-                    detail="No hay ningún profesional disponible en ese horario."
+                    detail="No hay ningún profesional disponible en ese horario para el servicio elegido."
                 )
+
+            # 1. Mezclamos al azar para desempatar de forma aleatoria
+            random.shuffle(candidates)
+
+            # 2. Elegimos al barbero disponible con MENOS turnos en ese día
+            chosen_barber, _ = min(candidates, key=lambda item: item[1])
+            assigned_employee_id = chosen_barber.id
+            assigned_duration = get_service_duration(chosen_barber, appointment_data.service)
+
+        # Obtener precio vigente configurado por el dueño y congelarlo en el turno
+        owner = db.query(User).filter(User.role == UserRole.OWNER).first()
+        assigned_price = get_service_price(owner, appointment_data.service)
 
         new_appointment = Appointment(
             client_name=appointment_data.client_name,
@@ -302,6 +434,8 @@ def create_appointment(
             service=appointment_data.service,
             date=target_date_str,
             time=target_time_str,
+            duration=assigned_duration,
+            price=assigned_price,
             employee_id=assigned_employee_id
         )
         
@@ -316,6 +450,9 @@ def create_appointment(
                 "metadata": {
                     "date": target_date_str,
                     "time": target_time_str,
+                    "service": appointment_data.service,
+                    "duration": assigned_duration,
+                    "price": assigned_price,
                     "assigned_to": assigned_employee_id
                 }
             }
@@ -324,7 +461,6 @@ def create_appointment(
         return new_appointment
 
     except HTTPException:
-        # Re-lanzamos las HTTPException (400/404/409) para que no caigan en el Error 500
         raise
     except Exception as e:
         print(f"\n[!!! ERROR CRÍTICO EN CREATE APPOINTMENT !!!]")

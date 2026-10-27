@@ -1,9 +1,11 @@
 :root {
-    --bg-color: #0f172a;
-    --card-bg: #1e293b;
-    --input-bg: #0f172a;
-    --border-color: #334155;
-    --primary: #6366f1;
+    --bg-color: #0b1118;
+    --card-bg: #151f2b;
+    --input-bg: #0d141c;
+    --border-color: #263547;
+    --primary: #10b981;
+    --primary-dark: #059669;
+    --cream-accent: #ebd6a7;
     --text-main: #f8fafc;
     --text-muted: #94a3b8;
 }
@@ -23,19 +25,32 @@ body {
     max-width: 450px;
 }
 
+/* Header horizontal clásico alineado a los bordes de la tarjeta */
 .header {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    margin-bottom: 20px;
+    margin-bottom: 18px;
+    padding: 0 2px;
 }
 
 .logo {
+    display: flex;
+    align-items: center;
     font-size: 1.5rem;
     font-weight: 800;
-    color: #a855f7;
+    color: var(--cream-accent);
     text-transform: none !important;
     letter-spacing: 1px;
+}
+
+.logo-img {
+    max-width: 155px;
+    width: 100%;
+    height: auto;
+    display: block;
+    mix-blend-mode: lighten;
+    filter: contrast(1.08) brightness(1.05);
 }
 
 .login-link {
@@ -43,19 +58,27 @@ body {
     text-decoration: none;
     font-size: 0.85rem;
     border-bottom: 1px solid var(--text-muted);
+    transition: color 0.2s, border-color 0.2s;
+}
+
+.login-link:hover {
+    color: var(--cream-accent);
+    border-color: var(--cream-accent);
 }
 
 .card {
     background-color: var(--card-bg);
+    border: 1px solid var(--border-color);
     border-radius: 16px;
     padding: 25px 20px;
-    box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5);
+    box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.55);
 }
 
 .card h2 {
     margin-top: 0;
     font-size: 1.25rem;
     margin-bottom: 20px;
+    color: var(--text-main);
 }
 
 .form-group {
@@ -83,21 +106,24 @@ select {
     font-size: 1rem;
     outline: none;
     appearance: none;
+    transition: border-color 0.2s, box-shadow 0.2s;
 }
 
 input:focus,
 select:focus {
     border-color: var(--primary);
+    box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.15);
 }
 
 input[type="date"]::-webkit-calendar-picker-indicator {
     filter: invert(1);
+    cursor: pointer;
 }
 
 button {
     width: 100%;
-    background: linear-gradient(135deg, #6366f1 0%, #a855f7 100%);
-    color: white;
+    background: linear-gradient(135deg, #10b981 0%, #047857 100%);
+    color: #ffffff;
     border: none;
     padding: 15px;
     border-radius: 8px;
@@ -105,11 +131,16 @@ button {
     font-weight: 600;
     cursor: pointer;
     margin-top: 10px;
-    transition: opacity 0.2s;
+    transition: opacity 0.2s, transform 0.1s;
+    box-shadow: 0 4px 12px rgba(16, 185, 129, 0.2);
+}
+
+button:hover {
+    opacity: 0.94;
 }
 
 button:active {
-    opacity: 0.8;
+    opacity: 0.85;
 }
 
 .footer {
@@ -119,7 +150,6 @@ button:active {
     color: var(--text-muted);
 }
 
-/* Estilo para el link de WhatsApp del footer */
 .footer-wpp-link {
     color: #94a3b8;
     text-decoration: none;
@@ -128,9 +158,10 @@ button:active {
 }
 
 .footer-wpp-link span {
-    color: #a78bfa;
+    color: var(--cream-accent);
     font-weight: 600;
     text-decoration: underline;
+    transition: color 0.2s;
 }
 
 .footer-wpp-link:hover {
@@ -138,5 +169,5 @@ button:active {
 }
 
 .footer-wpp-link:hover span {
-    color: #34d399; /* Pasa a verde WhatsApp al apoyar el cursor */
+    color: #34d399;
 }

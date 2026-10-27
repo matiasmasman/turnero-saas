@@ -5,15 +5,20 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Panel de Barberos - Men's Club</title>
-    <link rel="stylesheet" href="css/panel.css">
+    <link rel="stylesheet" href="css/panel.css?v=9">
 </head>
 
 <body>
 
     <div class="container">
         <div class="header">
-            <div class="logo" id="headerTitle">BARBERSHOP</div>
-            <a id="logoutBtn" class="logout-link" onclick="logout()">Cerrar sesión</a>
+            <div class="logo">
+                <img src="logo.jpg" alt="Men's Club" class="logo-img">
+            </div>
+            <div class="header-user-area">
+                <span id="loggedUserName" class="user-badge"></span>
+                <a id="logoutBtn" class="logout-link" onclick="logout()">Cerrar sesión</a>
+            </div>
         </div>
 
         <!-- LOGIN -->
@@ -35,7 +40,6 @@
                 <div class="agenda-title">
                     <h2>Agenda Semanal</h2>
 
-                    <!-- Navegador de Semana (Lunes a Domingo) -->
                     <div class="week-navigator">
                         <button type="button" id="prevWeekBtn" class="week-nav-btn" onclick="changeWeek(-1)"
                             title="Semana anterior" disabled>
@@ -48,7 +52,6 @@
                         </button>
                     </div>
 
-                    <!-- Botón rápido que aparece solo cuando estás mirando semanas futuras -->
                     <button type="button" id="resetWeekBtn" class="btn-reset-week" onclick="resetToCurrentWeek()"
                         style="display: none;">
                         ↺ Volver a esta semana
@@ -63,15 +66,20 @@
                             <span>Solo Hoy</span>
                         </label>
 
-                        <!-- Visible solo para el Dueño -->
-                        <label class="control-pill" id="onlyMineControl" style="display: none;">
+                        <label class="control-pill" id="onlyMineControl" hidden style="display: none !important;">
                             <input type="checkbox" id="onlyMineCheck">
-                            <span>Mis Turnos</span>
+                            <span>Todo el Local</span>
                         </label>
                     </div>
 
                     <!-- Fila 2: Navegación -->
                     <div class="controls-row">
+                        <button type="button" class="control-pill" onclick="showMetrics()">
+                            📊 Métricas
+                        </button>
+                        <button type="button" class="control-pill" onclick="showServices()">
+                            ✂️ Servicios
+                        </button>
                         <button type="button" class="control-pill" onclick="showSchedule()">
                             🕒 Horarios
                         </button>
@@ -85,16 +93,22 @@
             <div id="agendaContent">Cargando...</div>
         </div>
 
-        <!-- HORARIO HABITUAL -->
-        <section id="scheduleSection" style="display: none;">
-            <div class="exceptions-card">
-                <!-- Cabecera unificada -->
+        <!-- VISTA SERVICIOS (PRECIOS SOLO DUEÑO + DURACIONES DE CADA BARBERO) -->
+        <section id="servicesSection" style="display: none;">
+            <!-- Tarjeta 1: Precios (Visible ÚNICAMENTE para el Dueño) -->
+            <div class="exceptions-card" id="ownerPricesCard" style="display: none; margin-bottom: 16px;">
                 <div class="exc-header">
                     <div class="exc-header-titles">
-                        <h2>Horario Habitual</h2>
-                        <p>DÍAS Y TURNOS DE ATENCIÓN</p>
+                        <h2>Precios de Servicios</h2>
+                        <p>VALORES GENERALES Y PROMOCIONES</p>
                     </div>
                     <div class="exc-nav-pills">
+                        <button type="button" class="control-pill" onclick="showMetrics()">
+                            📊 Métricas
+                        </button>
+                        <button type="button" class="control-pill" onclick="showSchedule()">
+                            🕒 Horarios
+                        </button>
                         <button type="button" class="control-pill" onclick="showExceptions()">
                             🚫 Excepciones
                         </button>
@@ -104,9 +118,156 @@
                     </div>
                 </div>
 
-                <!-- Nota integrada -->
                 <div class="exc-hint">
-                    <span>Para trabajar de corrido, completá solo el <strong>1° Turno</strong> y dejá vacío el <strong>2° Turno</strong>.</span>
+                    <span>Los precios generales se muestran en la web pública. Las tarifas <strong>Promo 2x</strong> y <strong>VIP</strong> se aplican con un clic desde la agenda.</span>
+                </div>
+
+                <form id="pricesForm">
+                    <div class="schedule-days-box">
+                        <div class="schedule-day-item">
+                            <div class="schedule-day-header">
+                                <span class="day-name-text">Corte Normal ($)</span>
+                                <input type="number" id="priceCorte" class="time-input"
+                                    style="max-width: 140px; text-align: right;" min="0" step="500" required>
+                            </div>
+                        </div>
+
+                        <div class="schedule-day-item">
+                            <div class="schedule-day-header">
+                                <span class="day-name-text">Corte Promo 2x — c/u ($)</span>
+                                <input type="number" id="priceCortePromo2x" class="time-input"
+                                    style="max-width: 140px; text-align: right;" min="0" step="500" required>
+                            </div>
+                        </div>
+
+                        <div class="schedule-day-item">
+                            <div class="schedule-day-header">
+                                <span class="day-name-text">Corte VIP ($)</span>
+                                <input type="number" id="priceCorteVip" class="time-input"
+                                    style="max-width: 140px; text-align: right;" min="0" step="500" required>
+                            </div>
+                        </div>
+
+                        <div class="schedule-day-item">
+                            <div class="schedule-day-header">
+                                <span class="day-name-text">Barba ($)</span>
+                                <input type="number" id="priceBarba" class="time-input"
+                                    style="max-width: 140px; text-align: right;" min="0" step="500" required>
+                            </div>
+                        </div>
+
+                        <div class="schedule-day-item">
+                            <div class="schedule-day-header">
+                                <span class="day-name-text">Corte + Barba ($)</span>
+                                <input type="number" id="priceCorteBarba" class="time-input"
+                                    style="max-width: 140px; text-align: right;" min="0" step="500" required>
+                            </div>
+                        </div>
+                    </div>
+
+                    <button type="submit" class="btn-add-exception" style="margin-top: 16px;">
+                        Guardar Precios
+                    </button>
+                </form>
+            </div>
+
+            <!-- Tarjeta 2: Duración personalizada de cada barbero (Visible para Dueño y Empleados) -->
+            <div class="exceptions-card">
+                <div class="exc-header">
+                    <div class="exc-header-titles">
+                        <h2>Duración de mis Servicios</h2>
+                        <p>TIEMPO POR TURNO DE CADA TRABAJO</p>
+                    </div>
+                    <div class="exc-nav-pills" id="empServicesNavPills">
+                        <button type="button" class="control-pill" onclick="showMetrics()">
+                            📊 Métricas
+                        </button>
+                        <button type="button" class="control-pill" onclick="showSchedule()">
+                            🕒 Horarios
+                        </button>
+                        <button type="button" class="control-pill" onclick="showExceptions()">
+                            🚫 Excepciones
+                        </button>
+                        <button type="button" class="control-pill" onclick="showDashboard()">
+                            📅 Turnos
+                        </button>
+                    </div>
+                </div>
+
+                <div class="exc-hint">
+                    <span>Definí cuánto demorás en cada servicio. Tu agenda se ajustará automáticamente a estos
+                        tiempos.</span>
+                </div>
+
+                <form id="durationsForm">
+                    <div class="schedule-days-box">
+                        <div class="schedule-day-item">
+                            <div class="schedule-day-header">
+                                <span class="day-name-text">Corte</span>
+                                <select id="durCorte" class="time-input" style="max-width: 130px;">
+                                    <option value="30">30 min</option>
+                                    <option value="35">35 min</option>
+                                    <option value="40">40 min</option>
+                                    <option value="45">45 min</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <div class="schedule-day-item">
+                            <div class="schedule-day-header">
+                                <span class="day-name-text">Barba</span>
+                                <select id="durBarba" class="time-input" style="max-width: 130px;">
+                                    <option value="10">10 min</option>
+                                    <option value="15" selected>15 min</option>
+                                    <option value="20">20 min</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <div class="schedule-day-item">
+                            <div class="schedule-day-header">
+                                <span class="day-name-text">Corte + Barba</span>
+                                <input type="text" id="durCorteBarba" class="time-input" value="45 min"
+                                    style="max-width: 130px; text-align: center; opacity: 0.75; cursor: not-allowed;"
+                                    readonly disabled title="Se calcula automáticamente sumando Corte + Barba">
+                            </div>
+                        </div>
+                    </div>
+
+                    <button type="submit" class="btn-add-exception" style="margin-top: 16px;">
+                        Guardar mis Duraciones
+                    </button>
+                </form>
+            </div>
+        </section>
+
+        <!-- HORARIO HABITUAL -->
+        <section id="scheduleSection" style="display: none;">
+            <div class="exceptions-card">
+                <div class="exc-header">
+                    <div class="exc-header-titles">
+                        <h2>Horario Habitual</h2>
+                        <p>DÍAS Y TURNOS DE ATENCIÓN</p>
+                    </div>
+                    <div class="exc-nav-pills">
+                        <button type="button" class="control-pill" onclick="showMetrics()">
+                            📊 Métricas
+                        </button>
+                        <button type="button" class="control-pill" onclick="showServices()">
+                            ✂️ Servicios
+                        </button>
+                        <button type="button" class="control-pill" onclick="showExceptions()">
+                            🚫 Excepciones
+                        </button>
+                        <button type="button" class="control-pill" onclick="showDashboard()">
+                            📅 Turnos
+                        </button>
+                    </div>
+                </div>
+
+                <div class="exc-hint">
+                    <span>Para trabajar de corrido, completá solo el <strong>1° Turno</strong> y dejá vacío el
+                        <strong>2° Turno</strong>.</span>
                 </div>
 
                 <form id="scheduleForm">
@@ -121,13 +282,18 @@
         <!-- FERIADOS Y EXCEPCIONES -->
         <section id="exceptionsSection" style="display: none;">
             <div class="exceptions-card">
-                <!-- Cabecera alineada con botones tipo píldora -->
                 <div class="exc-header">
                     <div class="exc-header-titles">
                         <h2>Feriados y Excepciones</h2>
                         <p>BLOQUEOS DE AGENDA</p>
                     </div>
                     <div class="exc-nav-pills">
+                        <button type="button" class="control-pill" onclick="showMetrics()">
+                            📊 Métricas
+                        </button>
+                        <button type="button" class="control-pill" onclick="showServices()">
+                            ✂️ Servicios
+                        </button>
                         <button type="button" class="control-pill" onclick="showSchedule()">
                             🕒 Horarios
                         </button>
@@ -137,9 +303,7 @@
                     </div>
                 </div>
 
-                <!-- Formulario compacto -->
                 <form id="exceptionForm" class="exception-form-box">
-                    <!-- Nota integrada sutil -->
                     <div class="exc-hint">
                         <span>Para bloquear el día completo, elegí la fecha y dejá vacíos los campos de hora.</span>
                     </div>
@@ -159,7 +323,6 @@
                         </div>
                     </div>
 
-                    <!-- Checkbox visible ÚNICAMENTE cuando se loguea el Dueño -->
                     <div id="globalExceptionWrapper" class="exc-global-check" style="display: none;">
                         <label class="exc-checkbox-card">
                             <input type="checkbox" id="excGlobal">
@@ -170,7 +333,6 @@
                     <button type="submit" class="btn-add-exception">Agregar Excepción</button>
                 </form>
 
-                <!-- Lista de próximos bloqueos -->
                 <div class="upcoming-blocks">
                     <div class="upcoming-header">Próximos bloqueos</div>
                     <div id="exceptionsList" class="exceptions-list-box">
@@ -179,9 +341,86 @@
                 </div>
             </div>
         </section>
+
+        <!-- MÉTRICAS Y FACTURACIÓN -->
+        <section id="metricsSection" style="display: none;">
+            <div class="exceptions-card">
+                <div class="exc-header">
+                    <div class="exc-header-titles">
+                        <h2>Métricas y Caja</h2>
+                        <p id="metricsDateRange">RENDIMIENTO Y FACTURACIÓN</p>
+                    </div>
+                    <div class="exc-nav-pills">
+                        <button type="button" class="control-pill" onclick="showServices()">
+                            ✂️ Servicios
+                        </button>
+                        <button type="button" class="control-pill" onclick="showSchedule()">
+                            🕒 Horarios
+                        </button>
+                        <button type="button" class="control-pill" onclick="showExceptions()">
+                            🚫 Excepciones
+                        </button>
+                        <button type="button" class="control-pill" onclick="showDashboard()">
+                            📅 Turnos
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Barra de Filtros: Período + Selector de Barbero (Solo Dueño) -->
+                <div class="metrics-filter-bar">
+                    <div class="period-segmented-control">
+                        <button type="button" class="period-btn" data-period="today"
+                            onclick="changeMetricsPeriod('today')">Hoy</button>
+                        <button type="button" class="period-btn" data-period="week"
+                            onclick="changeMetricsPeriod('week')">Esta Semana</button>
+                        <button type="button" class="period-btn active" data-period="month"
+                            onclick="changeMetricsPeriod('month')">Este Mes</button>
+                    </div>
+
+                    <select id="metricsBarberFilter" class="time-input metrics-barber-select" style="display: none;">
+                    </select>
+                </div>
+
+                <!-- Grilla de KPIs (Solo Facturación y Turnos) -->
+                <div class="kpi-grid">
+                    <div class="kpi-card kpi-highlight">
+                        <span class="kpi-label">Facturación del Período</span>
+                        <h3 id="kpiTotalRevenue" class="kpi-value">$0</h3>
+                        <div class="kpi-split">
+                            <span class="kpi-badge-real" id="kpiRealRevenue">Cobrado: $0</span>
+                            <span class="kpi-badge-pending" id="kpiPendingRevenue">En agenda: $0</span>
+                        </div>
+                    </div>
+
+                    <div class="kpi-card">
+                        <span class="kpi-label">Turnos del Período</span>
+                        <h3 id="kpiTotalAppts" class="kpi-value">0</h3>
+                        <p id="kpiApptsDetail" class="kpi-subtext">0 completados · 0 pendientes</p>
+                    </div>
+                </div>
+
+                <!-- Gráfico 1: Barras de Evolución del Período -->
+                <div class="metrics-subcard">
+                    <div class="chart-header-row">
+                        <div class="upcoming-header" style="margin-bottom: 0;">Evolución del Período</div>
+                        <div class="chart-legend-inline">
+                            <span class="legend-dot-item"><i class="dot-real"></i> Cobrado</span>
+                            <span class="legend-dot-item"><i class="dot-pending"></i> En agenda</span>
+                        </div>
+                    </div>
+                    <div id="revenueBarChart" class="bar-chart-wrapper"></div>
+                </div>
+
+                <!-- Gráfico 2: Anillos de Proporción (Caja y Turnos) -->
+                <div class="metrics-subcard">
+                    <div class="upcoming-header">Estado de Caja y Turnos</div>
+                    <div id="donutsContainer" class="donuts-grid"></div>
+                </div>
+            </div>
+        </section>
     </div>
 
-    <script src="js/panel.js"></script>
+    <script src="js/panel.js?v=9"></script>
 </body>
 
 </html>
