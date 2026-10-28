@@ -1,7 +1,13 @@
 import json
 import logging
 from datetime import datetime, timezone
+from pathlib import Path
 import sys
+
+BASE_DIR = Path(__file__).resolve().parent.parent.parent
+LOG_DIR = BASE_DIR / "logs"
+LOG_DIR.mkdir(exist_ok=True)
+LOG_FILE = LOG_DIR / "security.log"
 
 class SecurityJSONFormatter(logging.Formatter):
     def format(self, record: logging.LogRecord) -> str:
@@ -20,14 +26,20 @@ class SecurityJSONFormatter(logging.Formatter):
 def setup_security_logger() -> logging.Logger:
     logger = logging.getLogger("security_telemetry")
     logger.setLevel(logging.INFO)
-    logger.propagate = False 
+    logger.propagate = False
 
-    handler = logging.StreamHandler(sys.stdout)
-    handler.setFormatter(SecurityJSONFormatter())
-    
+    formatter = SecurityJSONFormatter()
+
+    stream_handler = logging.StreamHandler(sys.stdout)
+    stream_handler.setFormatter(formatter)
+
+    file_handler = logging.FileHandler(LOG_FILE, encoding="utf-8")
+    file_handler.setFormatter(formatter)
+
     if not logger.handlers:
-        logger.addHandler(handler)
-        
+        logger.addHandler(stream_handler)
+        logger.addHandler(file_handler)
+
     return logger
 
 sec_logger = setup_security_logger()
