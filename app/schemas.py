@@ -56,6 +56,7 @@ class AppointmentResponse(BaseModel):
     status: str
     employee_id: int
     employee_name: Optional[str] = None
+    wa_link: Optional[str] = None  # link del botón de WhatsApp (None si está apagado)
 
     class Config:
         from_attributes = True

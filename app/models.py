@@ -1,6 +1,6 @@
 import enum
 from datetime import datetime
-from sqlalchemy import Column, Integer, String, Boolean, Enum, ForeignKey, DateTime, Time
+from sqlalchemy import Column, Integer, String, Boolean, Enum, ForeignKey, DateTime, Time, UniqueConstraint
 from sqlalchemy.orm import relationship
 from app.database import Base
 
@@ -91,3 +91,37 @@ class ScheduleException(Base):
     employee_id = Column(Integer, ForeignKey("users.id"), nullable=True)  # None = Feriado General (Owner)
 
     employee = relationship("User", backref="exceptions")
+
+
+# ==========================================
+# WHATSAPP (v2.1) — tablas nuevas, no tocan las existentes
+# ==========================================
+
+
+class WaOptin(Base):
+    """Código de cada turno para el botón de WhatsApp, y el chat que lo usó."""
+    __tablename__ = "wa_optins"
+
+    appointment_id = Column(Integer, ForeignKey("appointments.id", ondelete="CASCADE"), primary_key=True)
+    code = Column(String(6), unique=True, index=True, nullable=False)
+    jid = Column(String, nullable=True)                  # chat de WhatsApp que mandó el código
+    opted_in_at = Column(DateTime, nullable=True)        # UTC
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+class WaNotification(Base):
+    """Cola de avisos: confirmación, recordatorio y respuestas automáticas."""
+    __tablename__ = "wa_notifications"
+    __table_args__ = (UniqueConstraint("appointment_id", "kind", name="uq_wa_notif_appt_kind"),)
+
+    id = Column(Integer, primary_key=True, index=True)
+    appointment_id = Column(Integer, ForeignKey("appointments.id", ondelete="CASCADE"), nullable=True)
+    kind = Column(String, nullable=False)                # confirmation | reminder | autoreply | invalid_code
+    to_jid = Column(String, nullable=False)
+    scheduled_at = Column(DateTime, index=True, nullable=False)   # UTC
+    status = Column(String, default="pending", index=True, nullable=False)  # pending|sending|sent|failed|cancelled
+    attempts = Column(Integer, default=0, nullable=False)
+    last_error = Column(String, nullable=True)
+    sent_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)

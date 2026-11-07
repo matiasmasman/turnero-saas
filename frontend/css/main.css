@@ -171,3 +171,19 @@ button:active {
 .footer-wpp-link:hover span {
     color: #34d399;
 }
+
+/* ===== Botón de WhatsApp (v2.1) ===== */
+.wa-panel { text-align: center; padding: 8px 0; }
+.wa-panel h3 { margin: 0 0 6px; font-size: 1.3rem; }
+.wa-detail { margin: 0 0 20px; opacity: .8; }
+.wa-btn {
+    display: block; padding: 16px; border-radius: 10px;
+    background: #25d366; color: #0b141a; font-weight: 700; font-size: 1.05rem;
+    text-decoration: none; transition: filter .15s;
+}
+.wa-btn:hover { filter: brightness(1.08); }
+.wa-hint { margin: 10px 0 18px; font-size: .85rem; opacity: .7; }
+.wa-back {
+    background: none; border: none; color: #10b981; cursor: pointer;
+    text-decoration: underline; font-size: .9rem;
+}

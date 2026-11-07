@@ -137,14 +137,20 @@ document.addEventListener('DOMContentLoaded', async () => {
                     const assignedBarberName = createdAppt.employee_name 
                         || (barberOption ? barberOption.textContent.trim() : 'Asignado');
 
-                    alert(
-                        `¡Turno confirmado con éxito!\n` +
-                        `Barbero: ${assignedBarberName}\n` +
-                        `Te esperamos el ${payload.date} a las ${payload.time}.`
-                    );
                     appointmentForm.reset();
                     document.getElementById('appointmentDate').value = todayStr;
                     updateAvailableTimes();
+
+                    if (createdAppt.wa_link) {
+                        // Mostramos el botón de WhatsApp en lugar del formulario
+                        showWhatsAppPanel(createdAppt, assignedBarberName, payload);
+                    } else {
+                        alert(
+                            `¡Turno confirmado con éxito!\n` +
+                            `Barbero: ${assignedBarberName}\n` +
+                            `Te esperamos el ${payload.date} a las ${payload.time}.`
+                        );
+                    }
                 } else {
                     const error = await response.json();
                     alert(`No se pudo reservar: ${error.detail || 'Horario no disponible.'}`);
@@ -157,6 +163,44 @@ document.addEventListener('DOMContentLoaded', async () => {
                 submitBtn.disabled = false;
             }
         });
+    }
+
+    // 5. Panel de turno confirmado con botón de WhatsApp
+    function showWhatsAppPanel(appt, barberName, payload) {
+        const [y, m, d] = payload.date.split('-');
+        const panel = document.createElement('div');
+        panel.className = 'wa-panel';
+
+        const title = document.createElement('h3');
+        title.textContent = '¡Turno confirmado!';
+
+        const detail = document.createElement('p');
+        detail.className = 'wa-detail';
+        detail.textContent = `${barberName} · ${d}/${m}/${y} · ${payload.time} hs`;
+
+        const btn = document.createElement('a');
+        btn.className = 'wa-btn';
+        btn.href = appt.wa_link;
+        btn.target = '_blank';
+        btn.rel = 'noopener noreferrer';
+        btn.textContent = 'Quiero el recordatorio por WhatsApp';
+
+        const hint = document.createElement('p');
+        hint.className = 'wa-hint';
+        hint.textContent = 'Se abre WhatsApp con el mensaje listo: solo tocá enviar. Te avisamos 2 horas antes, sin publicidad.';
+
+        const back = document.createElement('button');
+        back.type = 'button';
+        back.className = 'wa-back';
+        back.textContent = 'Reservar otro turno';
+        back.addEventListener('click', () => {
+            panel.remove();
+            appointmentForm.hidden = false;
+        });
+
+        panel.append(title, detail, btn, hint, back);
+        appointmentForm.hidden = true;
+        appointmentForm.insertAdjacentElement('afterend', panel);
     }
 
     updateAvailableTimes();

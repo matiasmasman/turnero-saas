@@ -9,6 +9,7 @@ from app.database import get_db
 from app.models import Appointment, User, UserRole, WorkingHours, ScheduleException
 from app.schemas import AppointmentCreate, AppointmentResponse
 from app.core.telemetry import sec_logger
+from app.whatsapp import create_optin_link
 
 router = APIRouter(prefix="/appointments", tags=["Turnos Públicos"])
 
@@ -457,6 +458,13 @@ def create_appointment(
                 }
             }
         )
+
+        # WhatsApp: código del turno + link del botón. Si algo falla, el turno igual queda reservado.
+        try:
+            new_appointment.wa_link = create_optin_link(db, new_appointment)
+        except Exception:
+            db.rollback()
+            print(traceback.format_exc())
 
         return new_appointment
 
