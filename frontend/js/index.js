@@ -191,7 +191,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
         const hint = document.createElement('p');
         hint.className = 'wa-hint';
-        hint.textContent = 'Se abre WhatsApp con el mensaje listo: solo tocá enviar. Te avisamos 2 horas antes, sin publicidad.';
+        hint.textContent = 'Se abre WhatsApp con el mensaje listo: solo tocá enviar. Te confirmamos el turno y te lo recordamos 2 horas antes.';
 
         const back = document.createElement('button');
         back.type = 'button';
