@@ -257,6 +257,16 @@ async function fetchAppointments(token) {
     }
 }
 
+// Escapa texto que viene de clientes antes de meterlo en innerHTML (anti-XSS)
+function escapeHtml(value) {
+    return String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
 function renderAgenda(appointments) {
     const container = document.getElementById('agendaContent');
     container.innerHTML = '';
@@ -338,8 +348,11 @@ function renderAgenda(appointments) {
                 const endTime = `${String(endH).padStart(2, '0')}:${String(endM).padStart(2, '0')}`;
 
                 const barberBadge = (isOwner && app.employee_name)
-                    ? `<span class="barber-tag">${app.employee_name}</span>`
+                    ? `<span class="barber-tag">${escapeHtml(app.employee_name)}</span>`
                     : '';
+                const isCancelled = app.status === 'cancelled';
+                const safePhone = String(app.client_phone || '').replace(/\D/g, '');
+                const safeId = Number(app.id);
 
                 const currentPrice = app.price ?? shopPrices.price_corte;
                 const isCorte = app.service === 'Corte';
@@ -359,14 +372,14 @@ function renderAgenda(appointments) {
                 }
 
                 // Si es "Corte", el precio es clickeable para desplegar las opciones
-                const priceBadgeHtml = isCorte
+                const priceBadgeHtml = (isCorte && !isCancelled)
                     ? `<button type="button" class="price-tag clickable ${priceTierClass}" onclick="toggleTariffMenu(${app.id})" title="Cambiar tarifa">
                            ${formatARS(currentPrice)}${tierSuffix} <span class="price-caret">▾</span>
                        </button>`
                     : `<span class="price-tag">${formatARS(currentPrice)}</span>`;
 
                 // Menú oculto por defecto; se abre solo al tocar el precio
-                const tariffButtonsHtml = isCorte ? `
+                const tariffButtonsHtml = (isCorte && !isCancelled) ? `
                     <div id="tariff-pills-${app.id}" class="tariff-pills" style="display: none;">
                         <button type="button" class="tariff-btn ${isNormal ? 'active' : ''}"
                             onclick="cambiarTarifaTurno(${app.id}, 'normal')">
@@ -384,20 +397,20 @@ function renderAgenda(appointments) {
                 ` : '';
 
                 dayHtml += `
-                    <div class="appointment-item">
+                    <div class="appointment-item ${isCancelled ? 'appt-cancelled' : ''}">
                         <div class="appt-details">
                             <h3 class="appt-time">${app.time.substring(0, 5)} - ${endTime}</h3>
-                            <div class="name">${app.client_name}</div>
+                            <div class="name">${escapeHtml(app.client_name)}</div>
                             <div class="service-meta">
-                                <span class="service">${app.service}</span>
-                                ${priceBadgeHtml}
+                                <span class="service">${escapeHtml(app.service)}</span>
+                                ${isCancelled ? '<span class="cancelled-tag">Canceló por WhatsApp</span>' : priceBadgeHtml}
                                 ${barberBadge}
                             </div>
                             ${tariffButtonsHtml}
                         </div>
                         <div class="appt-actions">
-                            <button class="btn-wpp" onclick="abrirWpp('${app.client_phone}')">WhatsApp</button>
-                            <button class="btn-cancel" onclick="cancelarTurno(${app.id})">Cancelar</button>
+                            <button class="btn-wpp" onclick="abrirWpp('${safePhone}')">WhatsApp</button>
+                            ${isCancelled ? '' : `<button class="btn-cancel" onclick="cancelarTurno(${safeId})">Cancelar</button>`}
                         </div>
                     </div>
                 `;

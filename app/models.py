@@ -1,6 +1,6 @@
 import enum
 from datetime import datetime
-from sqlalchemy import Column, Integer, String, Boolean, Enum, ForeignKey, DateTime, Time, UniqueConstraint
+from sqlalchemy import Column, Integer, String, Boolean, Enum, ForeignKey, DateTime, Time, Text, UniqueConstraint
 from sqlalchemy.orm import relationship
 from app.database import Base
 
@@ -45,7 +45,7 @@ class Appointment(Base):
     time = Column(String, nullable=False)                   # Formato: HH:MM:SS
     duration = Column(Integer, nullable=False, default=30)  # Duración congelada al reservar
     price = Column(Integer, nullable=False, default=15000)  # Precio congelado al reservar
-    status = Column(String, default="confirmed")
+    status = Column(String, default="confirmed")            # confirmed | cancelled (canceló por WhatsApp)
     employee_id = Column(Integer, ForeignKey("users.id"), nullable=False)
 
     employee = relationship("User", back_populates="appointments")
@@ -116,8 +116,9 @@ class WaNotification(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     appointment_id = Column(Integer, ForeignKey("appointments.id", ondelete="CASCADE"), nullable=True)
-    kind = Column(String, nullable=False)                # confirmation | reminder | autoreply | invalid_code
+    kind = Column(String, nullable=False)                # confirmation | reminder | autoreply | invalid_code | cancel_*
     to_jid = Column(String, nullable=False)
+    body = Column(Text, nullable=True)                   # texto ya armado (mensajes de cancelación); si es None se arma al enviar
     scheduled_at = Column(DateTime, index=True, nullable=False)   # UTC
     status = Column(String, default="pending", index=True, nullable=False)  # pending|sending|sent|failed|cancelled
     attempts = Column(Integer, default=0, nullable=False)

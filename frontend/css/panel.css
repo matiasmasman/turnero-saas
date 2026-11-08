@@ -1217,3 +1217,23 @@ select:focus {
     color: #fbbf24;
     border-color: rgba(245, 158, 11, 0.45);
 }
+
+/* ==========================================
+   v2.2 · Turnos cancelados por el cliente (WhatsApp)
+   ========================================== */
+.appointment-item.appt-cancelled .appt-time,
+.appointment-item.appt-cancelled .name,
+.appointment-item.appt-cancelled .service {
+    text-decoration: line-through;
+    opacity: 0.55;
+}
+
+.cancelled-tag {
+    font-size: 0.74rem;
+    font-weight: 600;
+    color: #fca5a5;
+    background-color: rgba(239, 68, 68, 0.12);
+    border: 1px solid rgba(239, 68, 68, 0.35);
+    padding: 2px 8px;
+    border-radius: 6px;
+}

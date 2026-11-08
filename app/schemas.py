@@ -36,6 +36,24 @@ class AppointmentCreate(BaseModel):
     time: str
     employee_id: Optional[int] = None
 
+    @field_validator("client_name")
+    @classmethod
+    def validate_client_name(cls, value: str) -> str:
+        name = " ".join((value or "").split())  # saca espacios de más
+        if not 2 <= len(name) <= 40:
+            raise ValueError("El nombre tiene que tener entre 2 y 40 caracteres.")
+        if not re.fullmatch(r"[A-Za-zÁÉÍÓÚÜÑáéíóúüñ' .-]+", name):
+            raise ValueError("El nombre solo puede tener letras, espacios, puntos, guiones y apóstrofes.")
+        return name
+
+    @field_validator("client_phone")
+    @classmethod
+    def validate_client_phone(cls, value: str) -> str:
+        digits = re.sub(r"[\s\-()]", "", value or "")
+        if not re.fullmatch(r"\d{10}", digits):
+            raise ValueError("El teléfono tiene que tener 10 números, con característica y sin 0 ni 15 (ej: 2611234567).")
+        return digits
+
     @validator("time")
     def validate_time_format(cls, value):
         if not value or value.strip() == "":

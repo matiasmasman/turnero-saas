@@ -153,7 +153,11 @@ document.addEventListener('DOMContentLoaded', async () => {
                     }
                 } else {
                     const error = await response.json();
-                    alert(`No se pudo reservar: ${error.detail || 'Horario no disponible.'}`);
+                    // Los errores de validación (422) vienen como lista: mostramos el primero, prolijo
+                    const detail = Array.isArray(error.detail)
+                        ? String(error.detail[0]?.msg || '').replace(/^Value error, /, '')
+                        : error.detail;
+                    alert(`No se pudo reservar: ${detail || 'Horario no disponible.'}`);
                     updateAvailableTimes();
                 }
             } catch (error) {
