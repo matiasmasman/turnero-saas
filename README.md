@@ -1,4 +1,4 @@
-# 💈 Men's Club — SaaS Appointment System (v2.0.1 - Blue Team Edition)
+# 💈 Men's Club — SaaS Appointment System (v2.1.0 - Blue Team Edition)
 
 Sistema web de gestión de reservas y turnos **White-Label** en producción, diseñado bajo principios de **Seguridad por Diseño (Security by Design)**, control de acceso basado en roles (**RBAC**) y **telemetría estructurada en JSON** integrada en tiempo real con **Wazuh SIEM/XDR**.
 
