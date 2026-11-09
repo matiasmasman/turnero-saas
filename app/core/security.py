@@ -1,8 +1,16 @@
+import os
+
+from dotenv import load_dotenv
 from passlib.context import CryptContext
 from datetime import datetime, timedelta, timezone
 from jose import jwt
 
-SECRET_KEY = "clave-super-secreta-cambiar-en-donweb"
+load_dotenv(override=True)
+
+# La clave se lee SOLO del .env (nunca escrita en el código)
+SECRET_KEY = os.getenv("SECRET_KEY", "")
+if len(SECRET_KEY) < 32:
+    raise RuntimeError("SECRET_KEY falta en el .env o es muy corta (mínimo 32 caracteres)")
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7 # 7 días
 
