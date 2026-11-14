@@ -45,6 +45,8 @@ REMINDER_BEFORE = timedelta(hours=2)
 QUIET_UNTIL_HOUR = 8      # si el recordatorio cae antes de las 8...
 NIGHT_BEFORE_HOUR = 20    # ...se manda a las 20 h del día anterior
 MAX_ATTEMPTS = 8
+MAX_INBOUND_ATTEMPTS = 3                      # intentos para procesar un mensaje entrante antes de descartarlo
+INBOUND_RETRY_GAP = timedelta(seconds=60)     # espera mínima entre intentos de un mismo mensaje
 CANCEL_DEADLINE = timedelta(hours=1)          # se puede cancelar hasta 1 h antes
 CANCEL_CONFIRM_WINDOW = timedelta(minutes=15)  # tiempo para responder SI
 LOCK_FILE = Path(__file__).resolve().parent.parent / "logs" / ".wa_dispatcher.lock"
@@ -56,6 +58,9 @@ WEEKDAYS = ["lun", "mar", "mié", "jue", "vie", "sáb", "dom"]
 
 
 # ---------- Utilidades ----------
+_MISSING = object()   # marca "no había entrada" al restaurar la memoria del dispatcher
+
+
 def utcnow() -> datetime:
     """UTC sin zona, que es como lo guardamos en la base."""
     return datetime.now(timezone.utc).replace(tzinfo=None)
@@ -227,7 +232,7 @@ def wa_request(method: str, path: str, body: Optional[dict] = None, timeout: flo
             return resp.status, json.loads(data or b"{}")
         except ValueError:
             return resp.status, {}
-    except OSError as e:
+    except (OSError, http.client.HTTPException) as e:
         return 0, {"error": str(e)}
     finally:
         conn.close()
@@ -242,6 +247,8 @@ class Dispatcher:
         self._last_autoreply = {}   # jid -> momento (solo 1 por día)
         self._invalid = {}          # jid -> (día, intentos)
         self._pending_cancel = {}   # jid -> (appointment_id o None, vence)
+        self._inbound_failures = {} # id del mensaje -> (intentos fallidos, no reintentar antes de)
+        self._unacked = set()       # ids ya procesados cuyo ack falló: solo se reenvía el ack
         self._was_down = False
 
     def start(self):
@@ -281,13 +288,20 @@ class Dispatcher:
             self._stop.wait(5)
 
     def _reset_stuck(self):
+        # Al arrancar nadie más está enviando (tenemos el candado y el hilo todavía no arrancó),
+        # así que todo lo que quedó en "sending" se cortó a mitad. Se reintenta con la misma
+        # llave n{id}, así que el cartero no lo manda dos veces.
         db = SessionLocal()
         try:
-            cutoff = utcnow() - timedelta(minutes=5)
+            ids = [r.id for r in db.query(WaNotification.id).filter(WaNotification.status == "sending")]
+            if not ids:
+                return
             db.query(WaNotification).filter(
-                WaNotification.status == "sending", WaNotification.updated_at < cutoff
-            ).update({"status": "pending"})
+                WaNotification.id.in_(ids), WaNotification.status == "sending"
+            ).update({"status": "pending"}, synchronize_session=False)
             db.commit()
+            log("warning", "WA_STUCK_RESET", "Avisos trabados en 'sending' devueltos a 'pending'",
+                count=len(ids), notification_ids=ids[:50])
         finally:
             db.close()
 
@@ -305,18 +319,76 @@ class Dispatcher:
         if status != 200:
             return
         items = data.get("items", [])
+        # Olvidamos contadores de mensajes que ya no están en el buzón (no crece sin límite)
+        present = {item.get("id") for item in items}
+        self._inbound_failures = {k: v for k, v in self._inbound_failures.items() if k in present}
+        self._unacked &= present
         if not items:
             return
-        db = SessionLocal()
+        now = utcnow()
         done = []
+        waiting = set()   # chats con un mensaje esperando reintento: sus siguientes quedan para otra vuelta
         try:
             for item in items:
-                self._handle_inbound(db, item)
-                done.append(item["id"])
+                msg_id, jid = item.get("id"), item.get("jid")
+                if msg_id in self._unacked:
+                    done.append(msg_id)  # ya se procesó en una vuelta anterior: solo falta el ack
+                    continue
+                if jid in waiting:
+                    continue  # orden por chat: no se procesa, no se marca leído, no cuenta como fallo
+                failure = self._inbound_failures.get(msg_id)
+                if failure and now < failure[1]:
+                    waiting.add(jid)  # todavía no pasó la espera mínima para reintentarlo
+                    continue
+                if self._process_one(item):
+                    if msg_id:
+                        done.append(msg_id)
+                else:
+                    waiting.add(jid)
+        finally:
+            if done:
+                ack_status, _ = wa_request("POST", "/inbox/ack", {"ids": done}, timeout=10)
+                if ack_status == 200:
+                    self._unacked.difference_update(done)
+                else:
+                    self._unacked.update(done)  # no se vuelven a procesar: en la próxima vuelta solo el ack
+
+    def _process_one(self, item: dict) -> bool:
+        """Procesa un mensaje por separado. True = marcarlo como leído (salió bien o se descartó)."""
+        msg_id, jid = item.get("id"), item.get("jid")
+        # Las tres memorias usan el jid como clave y sus valores no se modifican en el lugar
+        # (datetime y tuplas), así que alcanza con guardar el valor tal cual.
+        memory = (self._last_autoreply, self._invalid, self._pending_cancel)
+        before = [d.get(jid, _MISSING) for d in memory]
+        db = SessionLocal()
+        try:
+            self._handle_inbound(db, item)
+            self._inbound_failures.pop(msg_id, None)
+            return True
+        except Exception as e:
+            try:
+                db.rollback()
+            except Exception:
+                pass  # si la base está caída, el close() de abajo descarta la conexión
+            for d, old in zip(memory, before):  # deshacemos también lo que quedó a medias en memoria
+                if old is _MISSING:
+                    d.pop(jid, None)
+                else:
+                    d[jid] = old
+            attempts = self._inbound_failures.get(msg_id, (0, None))[0] + 1
+            # Nunca str(e): puede traer el texto del mensaje o el jid completo
+            meta = {"message_id": msg_id, "error_type": type(e).__name__,
+                    "attempts": attempts, "jid": mask(jid)}
+            if attempts >= MAX_INBOUND_ATTEMPTS:
+                self._inbound_failures.pop(msg_id, None)
+                log("error", "WA_INBOUND_FAILED", "Mensaje entrante descartado tras varios errores", **meta)
+                return True
+            self._inbound_failures[msg_id] = (attempts, utcnow() + INBOUND_RETRY_GAP)
+            log("warning", "WA_INBOUND_RETRY", "Error al procesar un mensaje entrante; se reintenta",
+                retry_in_s=int(INBOUND_RETRY_GAP.total_seconds()), **meta)
+            return False
         finally:
             db.close()
-            if done:
-                wa_request("POST", "/inbox/ack", {"ids": done}, timeout=10)
 
     def _queue(self, db, kind: str, jid: str, appointment_id: Optional[int] = None,
                when: Optional[datetime] = None, body: Optional[str] = None):
@@ -365,14 +437,15 @@ class Dispatcher:
                 db.commit()
             return
 
+        appt_id = appt.id  # leído antes del commit: después del commit, appt.id vuelve a consultar la base
         optin.jid = jid
         optin.opted_in_at = now
-        self._queue(db, "confirmation", jid, appt.id)
+        self._queue(db, "confirmation", jid, appt_id)
         reminder_at = reminder_time_utc(appt)
         if reminder_at > now + timedelta(minutes=5):
-            self._queue(db, "reminder", jid, appt.id, reminder_at)
+            self._queue(db, "reminder", jid, appt_id, reminder_at)
         db.commit()
-        log("info", "WA_OPTIN", "Cliente pidió avisos por WhatsApp", appointment_id=appt.id, jid=mask(jid))
+        log("info", "WA_OPTIN", "Cliente pidió avisos por WhatsApp", appointment_id=appt_id, jid=mask(jid))
 
     # --- Cancelación por WhatsApp (v2.2) ---
     def _next_appointment(self, db, jid: str, now: datetime) -> Optional[Appointment]:
@@ -438,8 +511,9 @@ class Dispatcher:
         ).update({"status": "cancelled", "last_error": "el cliente canceló por WhatsApp"})
         self._queue(db, "cancel_done", jid, body=render_cancel("cancel_done", appt))
         db.commit()
+        # appt_id (variable local), no appt.id: después del commit, appt.id vuelve a consultar la base
         log("info", "WA_APPOINTMENT_CANCELLED", "Cliente canceló su turno por WhatsApp",
-            appointment_id=appt.id, jid=mask(jid))
+            appointment_id=appt_id, jid=mask(jid))
 
     # --- Envíos ---
     def send_due(self):
