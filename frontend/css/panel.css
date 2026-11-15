@@ -1237,3 +1237,87 @@ select:focus {
     padding: 2px 8px;
     border-radius: 6px;
 }
+
+/* ==========================================
+   Entrega 3c · Mis servicios (pensado primero para el celular, ~360 px)
+   Reusa las filas de Horarios: .schedule-day-item / .day-off / .schedule-day-toggle
+   ========================================== */
+.my-svc-row {
+    padding: 12px 14px;
+}
+
+.my-svc-header {
+    gap: 12px;
+    margin-bottom: 4px !important;
+}
+
+.my-svc-toggle {
+    flex: 1 1 auto;
+    min-width: 0;                 /* deja que el nombre largo baje de renglón */
+    min-height: 44px;             /* zona cómoda para tocar con el dedo */
+}
+
+.my-svc-toggle input[type="checkbox"] {
+    flex: 0 0 auto;
+    width: 22px !important;
+    height: 22px !important;
+}
+
+.my-svc-name {
+    overflow-wrap: anywhere;
+    line-height: 1.3;
+}
+
+.my-svc-duration {
+    flex: 0 0 104px;
+    width: 104px !important;
+    min-height: 40px;
+    text-align: center;
+}
+
+.my-svc-meta,
+.my-svc-warn {
+    margin: 0 0 0 32px;           /* alineado con el nombre, después de la casilla */
+    font-size: 0.76rem;
+    line-height: 1.35;
+}
+
+.my-svc-meta {
+    color: var(--text-muted);
+}
+
+.my-svc-warn {
+    margin-top: 6px;
+    color: #fbbf24;
+}
+
+.my-services-save {
+    margin-top: 16px;
+}
+
+.my-services-status {
+    margin: 12px 0 0;
+    padding: 10px 12px;
+    border-radius: 10px;
+    font-size: 0.85rem;
+    line-height: 1.4;
+    white-space: pre-line;        /* un aviso por renglón */
+}
+
+.my-services-status.is-ok {
+    background-color: rgba(16, 185, 129, 0.10);
+    border: 1px solid rgba(16, 185, 129, 0.32);
+    color: var(--whatsapp);
+}
+
+.my-services-status.is-warn {
+    background-color: rgba(245, 158, 11, 0.10);
+    border: 1px solid rgba(245, 158, 11, 0.38);
+    color: #fbbf24;
+}
+
+.my-services-status.is-error {
+    background-color: var(--danger-bg);
+    border: 1px solid var(--danger-border);
+    color: var(--danger-text);
+}

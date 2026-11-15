@@ -6,7 +6,7 @@ from app.core.middleware import SecurityTelemetryMiddleware
 from app.core.schema import ensure_schema_ready
 from app.core.telemetry import sec_logger
 from app.database import engine
-from app.routers import auth, appointments, admin, catalog
+from app.routers import auth, appointments, admin, catalog, my_services
 from app.whatsapp import dispatcher
 from fastapi.staticfiles import StaticFiles
 
@@ -38,6 +38,7 @@ app.include_router(auth.router)
 app.include_router(appointments.router)
 app.include_router(admin.router)
 app.include_router(catalog.router)
+app.include_router(my_services.router)
 
 
 @app.get("/health")

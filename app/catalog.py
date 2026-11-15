@@ -117,13 +117,17 @@ def _future(now: datetime):
     )
 
 
-def future_appointments_for_service(db: Session, service: Service, now: Optional[datetime] = None) -> int:
+def future_appointments_for_service(db: Session, service: Service, now: Optional[datetime] = None,
+                                    employee_id: Optional[int] = None) -> int:
     """Turnos confirmados desde ahora que usan el servicio: por service_id, o por nombre si el turno
-    no tiene service_id (los reservados antes de 3e). Hoy hay un solo negocio; cuando appointments
-    tenga business_id, el filtro por nombre tiene que sumarlo."""
+    no tiene service_id (los reservados antes de 3e). Con employee_id, solo los de ese barbero.
+    Hoy hay un solo negocio; cuando appointments tenga business_id, el filtro por nombre tiene que sumarlo."""
     uses = or_(Appointment.service_id == service.id,
                and_(Appointment.service_id.is_(None), Appointment.service == service.name))
-    return db.query(func.count(Appointment.id)).filter(_future(now or now_local()), uses).scalar()
+    query = db.query(func.count(Appointment.id)).filter(_future(now or now_local()), uses)
+    if employee_id is not None:
+        query = query.filter(Appointment.employee_id == employee_id)
+    return query.scalar()
 
 
 def future_appointments_for_discount(db: Session, discount: Discount, now: Optional[datetime] = None) -> int:

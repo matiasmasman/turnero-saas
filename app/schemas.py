@@ -341,3 +341,43 @@ class DiscountStatusOut(BaseModel):
     discount: DiscountOut
     changed: bool
     future_appointments: int
+
+
+# ==========================================
+# ESQUEMAS DE "MIS SERVICIOS" (Entrega 3c, cada barbero lo suyo)
+# No hay employee_id ni business_id: siempre es el usuario logueado y su negocio.
+# ==========================================
+class MyServiceIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    service_id: EntityId
+    duration: Duration
+
+
+class MyServicesUpdate(BaseModel):
+    """Lista COMPLETA de los servicios activos que hago. Los que no vengan quedan desmarcados
+    (se recuerda su duración). Lista vacía = no hago ninguno."""
+    model_config = ConfigDict(extra="forbid")
+    services: List[MyServiceIn] = Field(..., max_length=100)
+
+    @field_validator("services")
+    @classmethod
+    def _check_services(cls, services):
+        return _unique_services(services)
+
+
+class MyServiceOut(BaseModel):
+    service_id: int
+    name: str
+    base_duration: int
+    does: bool                  # "Lo hago"
+    duration: int               # la mía; si nunca lo hice, la duración base del servicio
+    future_appointments: int    # mis turnos confirmados desde ahora con este servicio
+
+
+class MyServicesOut(BaseModel):
+    services: List[MyServiceOut]
+
+
+class MyServicesSaveOut(MyServicesOut):
+    changed: bool
+    warnings: List[str] = []

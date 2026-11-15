@@ -21,9 +21,6 @@ let currentMetricsPeriod = 'month';
 let currentMetricsEmployeeId = '';
 let metricsBarbersLoaded = false;
 
-const CORTE_STEPS = [30, 35, 40, 45];
-const BARBA_STEPS = [10, 15, 20];
-
 function formatLocalDate(d) {
     const year = d.getFullYear();
     const month = String(d.getMonth() + 1).padStart(2, '0');
@@ -44,11 +41,6 @@ function formatCompactARS(amount) {
 }
 
 document.addEventListener('DOMContentLoaded', async () => {
-    populateDurationSelects(30, 15);
-
-    document.getElementById('durCorte')?.addEventListener('change', updateCombinedDurationDisplay);
-    document.getElementById('durBarba')?.addEventListener('change', updateCombinedDurationDisplay);
-
     document.getElementById('metricsBarberFilter')?.addEventListener('change', (e) => {
         currentMetricsEmployeeId = e.target.value;
         loadMetricsData();
@@ -716,37 +708,9 @@ function renderDonutCharts(data) {
 }
 
 // ==========================================
-// VISTA SERVICIOS (PRECIOS DUEÑO + DURACIONES DE CADA BARBERO)
+// VISTA SERVICIOS (PRECIOS DUEÑO + MIS SERVICIOS DE CADA BARBERO)
+// "Mis servicios" está en js/my-services.js (loadMyServices)
 // ==========================================
-
-function updateCombinedDurationDisplay() {
-    const corteVal = parseInt(document.getElementById('durCorte')?.value, 10) || 30;
-    const barbaVal = parseInt(document.getElementById('durBarba')?.value, 10) || 15;
-    const combinedEl = document.getElementById('durCorteBarba');
-
-    if (combinedEl) {
-        const total = corteVal + barbaVal;
-        combinedEl.value = `${total} min`;
-        combinedEl.dataset.minutes = total;
-    }
-}
-
-function populateDurationSelects(corte = 30, barba = 15) {
-    const buildOpts = (steps, selectedVal) => {
-        const safeVal = steps.includes(Number(selectedVal)) ? Number(selectedVal) : steps[0];
-        return steps.map(min =>
-            `<option value="${min}" ${min === safeVal ? 'selected' : ''}>${min} min</option>`
-        ).join('');
-    };
-
-    const corteEl = document.getElementById('durCorte');
-    const barbaEl = document.getElementById('durBarba');
-
-    if (corteEl) corteEl.innerHTML = buildOpts(CORTE_STEPS, corte);
-    if (barbaEl) barbaEl.innerHTML = buildOpts(BARBA_STEPS, barba);
-
-    updateCombinedDurationDisplay();
-}
 
 async function showServices() {
     hideAllSections();
@@ -768,27 +732,7 @@ async function showServices() {
         empNavPills.style.display = isOwner ? 'none' : 'flex';
     }
 
-    await loadServiceDurations(token);
-    await loadServicePrices(token);
-}
-
-async function loadServiceDurations(token) {
-    try {
-        const res = await fetch(`${API_URL}/admin/service-durations`, {
-            headers: { 'Authorization': `Bearer ${token}` }
-        });
-        if (res.ok) {
-            const data = await res.json();
-            populateDurationSelects(data.duration_corte, data.duration_barba);
-            return;
-        }
-    } catch (err) {
-        console.error("Error al cargar duraciones de servicios:", err);
-    }
-    populateDurationSelects(
-        currentUser?.duration_corte || 30,
-        currentUser?.duration_barba || 15
-    );
+    await Promise.all([loadMyServices(), loadServicePrices(token)]);
 }
 
 async function loadServicePrices(token) {
@@ -859,48 +803,6 @@ document.getElementById('pricesForm')?.addEventListener('submit', async function
         } else {
             const error = await response.json();
             alert('Error al guardar precios: ' + (error.detail || JSON.stringify(error)));
-        }
-    } catch (err) {
-        alert('Error de conexión con el servidor.');
-    }
-});
-
-document.getElementById('durationsForm')?.addEventListener('submit', async function (e) {
-    e.preventDefault();
-
-    const corteMin = parseInt(document.getElementById('durCorte').value, 10);
-    const barbaMin = parseInt(document.getElementById('durBarba').value, 10);
-
-    const payload = {
-        duration_corte: corteMin,
-        duration_barba: barbaMin,
-        duration_corte_barba: corteMin + barbaMin
-    };
-
-    const token = localStorage.getItem('access_token');
-
-    try {
-        const response = await fetch(`${API_URL}/admin/service-durations`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${token}`
-            },
-            body: JSON.stringify(payload)
-        });
-
-        if (response.ok) {
-            const updated = await response.json();
-            if (currentUser) {
-                currentUser.duration_corte = updated.duration_corte;
-                currentUser.duration_barba = updated.duration_barba;
-                currentUser.duration_corte_barba = updated.duration_corte_barba;
-            }
-            updateCombinedDurationDisplay();
-            alert('Duraciones guardadas correctamente');
-        } else {
-            const error = await response.json();
-            alert('Error al guardar duraciones: ' + (error.detail || JSON.stringify(error)));
         }
     } catch (err) {
         alert('Error de conexión con el servidor.');

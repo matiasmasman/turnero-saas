@@ -5,7 +5,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Panel de Barberos - Men's Club</title>
-    <link rel="stylesheet" href="css/panel.css?v=10">
+    <link rel="stylesheet" href="css/panel.css?v=11">
 </head>
 
 <body>
@@ -93,7 +93,7 @@
             <div id="agendaContent">Cargando...</div>
         </div>
 
-        <!-- VISTA SERVICIOS (PRECIOS SOLO DUEÑO + DURACIONES DE CADA BARBERO) -->
+        <!-- VISTA SERVICIOS (PRECIOS SOLO DUEÑO + MIS SERVICIOS DE CADA BARBERO) -->
         <section id="servicesSection" style="display: none;">
             <!-- Tarjeta 1: Precios (Visible ÚNICAMENTE para el Dueño) -->
             <div class="exceptions-card" id="ownerPricesCard" style="display: none; margin-bottom: 16px;">
@@ -171,71 +171,34 @@
                 </form>
             </div>
 
-            <!-- Tarjeta 2: Duración personalizada de cada barbero (Visible para Dueño y Empleados) -->
-            <div class="exceptions-card">
+            <!-- Tarjeta 2: Mis servicios (Dueño y Empleados): qué servicios hago y cuánto tardo en cada uno.
+                 Sin onclick: los botones los conecta js/my-services.js con addEventListener. -->
+            <div class="exceptions-card" id="myServicesCard">
                 <div class="exc-header">
                     <div class="exc-header-titles">
-                        <h2>Duración de mis Servicios</h2>
-                        <p>TIEMPO POR TURNO DE CADA TRABAJO</p>
+                        <h2>Mis servicios</h2>
+                        <p>QUÉ HAGO Y CUÁNTO TARDO</p>
                     </div>
                     <div class="exc-nav-pills" id="empServicesNavPills">
-                        <button type="button" class="control-pill" onclick="showMetrics()">
-                            📊 Métricas
-                        </button>
-                        <button type="button" class="control-pill" onclick="showSchedule()">
-                            🕒 Horarios
-                        </button>
-                        <button type="button" class="control-pill" onclick="showExceptions()">
-                            🚫 Excepciones
-                        </button>
-                        <button type="button" class="control-pill" onclick="showDashboard()">
-                            📅 Turnos
-                        </button>
+                        <button type="button" class="control-pill" data-go="metrics">📊 Métricas</button>
+                        <button type="button" class="control-pill" data-go="schedule">🕒 Horarios</button>
+                        <button type="button" class="control-pill" data-go="exceptions">🚫 Excepciones</button>
+                        <button type="button" class="control-pill" data-go="dashboard">📅 Turnos</button>
                     </div>
                 </div>
 
                 <div class="exc-hint">
-                    <span>Definí cuánto demorás en cada servicio. Tu agenda se ajustará automáticamente a estos
-                        tiempos.</span>
+                    <span>Marcá los servicios que hacés y elegí cuánto tardás en cada uno. Los precios no cambian.
+                        Por ahora la reserva sigue usando tus tiempos de antes: esto se va a usar con la reserva nueva.</span>
                 </div>
 
-                <form id="durationsForm">
-                    <div class="schedule-days-box">
-                        <div class="schedule-day-item">
-                            <div class="schedule-day-header">
-                                <span class="day-name-text">Corte</span>
-                                <select id="durCorte" class="time-input" style="max-width: 130px;">
-                                    <option value="30">30 min</option>
-                                    <option value="35">35 min</option>
-                                    <option value="40">40 min</option>
-                                    <option value="45">45 min</option>
-                                </select>
-                            </div>
-                        </div>
-
-                        <div class="schedule-day-item">
-                            <div class="schedule-day-header">
-                                <span class="day-name-text">Barba</span>
-                                <select id="durBarba" class="time-input" style="max-width: 130px;">
-                                    <option value="10">10 min</option>
-                                    <option value="15" selected>15 min</option>
-                                    <option value="20">20 min</option>
-                                </select>
-                            </div>
-                        </div>
-
-                        <div class="schedule-day-item">
-                            <div class="schedule-day-header">
-                                <span class="day-name-text">Corte + Barba</span>
-                                <input type="text" id="durCorteBarba" class="time-input" value="45 min"
-                                    style="max-width: 130px; text-align: center; opacity: 0.75; cursor: not-allowed;"
-                                    readonly disabled title="Se calcula automáticamente sumando Corte + Barba">
-                            </div>
-                        </div>
+                <form id="myServicesForm" novalidate>
+                    <div class="schedule-days-box" id="myServicesList">
+                        <p class="empty-exceptions">Cargando...</p>
                     </div>
-
-                    <button type="submit" class="btn-add-exception" style="margin-top: 16px;">
-                        Guardar mis Duraciones
+                    <p id="myServicesStatus" class="my-services-status" role="status" hidden></p>
+                    <button type="submit" id="myServicesSave" class="btn-add-exception my-services-save">
+                        Guardar mis servicios
                     </button>
                 </form>
             </div>
@@ -420,7 +383,8 @@
         </section>
     </div>
 
-    <script src="js/panel.js?v=10"></script>
+    <script src="js/panel.js?v=11"></script>
+    <script src="js/my-services.js?v=1"></script>
 </body>
 
 </html>
