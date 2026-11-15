@@ -20,6 +20,7 @@ import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
+_REAL_SOCKET = socket.socket   # el original, antes de que `sin_sockets` lo bloquee
 
 # 1) Variables de entorno de prueba (antes de importar la app)
 os.environ.update({
@@ -146,6 +147,7 @@ class _ListHandler(logging.Handler):
 
     def emit(self, record):
         self.events.append({"event_type": getattr(record, "event_type", None),
+                            "actor_id": getattr(record, "actor_id", None),
                             "message": record.getMessage(),
                             "metadata": getattr(record, "metadata", {})})
 
@@ -161,3 +163,62 @@ def events():
 @pytest.fixture
 def dispatcher():
     return wa.Dispatcher()
+
+
+# ---------- API (TestClient) — Entrega 3b ----------
+@pytest.fixture
+def api(monkeypatch):
+    """La app de FastAPI lista para TestClient, sobre una base SQLite en memoria ya "migrada".
+
+    - app.main tiene la protección de arranque (exige la migración e3a): la base de prueba se arma
+      con create_all + el negocio 1 + la fila de schema_migrations, y se le pasa a app.main
+      reemplazando app.database.engine ANTES de importarlo (app.main se importa de cero).
+    - SECRET_KEY de prueba: app.core.security la exige al importarse.
+    - WhatsApp apagado: el TestClient se usa SIN "with", así no corre el lifespan (que arranca el
+      dispatcher); además dispatcher.start queda anulado por las dudas.
+    - get_db se reemplaza por sesiones de esta base (lo usan los endpoints y get_current_user).
+    """
+    import importlib
+    from fastapi.testclient import TestClient
+    import app.database
+    from app.core.schema import REQUIRED_MIGRATIONS
+
+    engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+    models.Base.metadata.create_all(engine)
+    with engine.begin() as conn:
+        conn.execute(models.Business.__table__.insert().values(id=1, slug="mensclub", name="Men's Club"))
+        for migration_id in REQUIRED_MIGRATIONS:
+            conn.execute(models.SchemaMigration.__table__.insert().values(id=migration_id))
+    factory = sessionmaker(bind=engine, autocommit=False, autoflush=False)
+
+    monkeypatch.setenv("SECRET_KEY", "k" * 40)
+    monkeypatch.setattr(app.database, "engine", engine)
+    monkeypatch.setattr(wa.dispatcher, "start", lambda: None)
+
+    # TestClient usa un event loop de asyncio, que crea un socketpair local (sin red) para despertarse.
+    # Solo se permite "envolver" un descriptor que ya existe (lo que hace socketpair); crear un socket
+    # nuevo, que es lo único que podría conectarse a algo, sigue prohibido como en `sin_sockets`.
+    def _solo_socketpair(family=-1, type=-1, proto=-1, fileno=None):
+        if fileno is None:
+            raise AssertionError("Las pruebas no pueden abrir sockets")
+        return _REAL_SOCKET(family, type, proto, fileno)
+    monkeypatch.setattr(socket, "socket", _solo_socketpair)
+    monkeypatch.chdir(ROOT)                      # StaticFiles("frontend") es relativo
+    sys.modules.pop("app.main", None)
+    main = importlib.import_module("app.main")
+
+    def _db():
+        db = factory()
+        try:
+            yield db
+        finally:
+            db.close()
+
+    main.app.dependency_overrides[app.database.get_db] = _db
+    client = TestClient(main.app)                # sin "with": no corre el lifespan
+    try:
+        yield types.SimpleNamespace(client=client, Session=factory, engine=engine)
+    finally:
+        main.app.dependency_overrides.clear()
+        sys.modules.pop("app.main", None)
+        engine.dispose()

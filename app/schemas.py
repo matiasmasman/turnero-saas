@@ -1,6 +1,6 @@
-from pydantic import BaseModel, validator, Field, model_validator, field_validator
+from pydantic import BaseModel, ConfigDict, validator, Field, model_validator, field_validator
 from app.models import UserRole
-from typing import Literal, Optional, List
+from typing import Annotated, Literal, Optional, List
 from datetime import time, date as dt_date
 import re
 
@@ -225,3 +225,119 @@ class ExceptionResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+# ==========================================
+# ESQUEMAS DEL CATÁLOGO (Entrega 3b, solo OWNER)
+# Entrada: extra="forbid" (nadie puede mandar business_id, id, active...) y enteros estrictos
+# (no se aceptan "15000" como texto, 15000.5 ni true).
+# ==========================================
+from app.catalog import (DURATION_MAX, DURATION_MIN, DURATION_STEP,  # noqa: E402
+                         PRICE_MAX, PRICE_MIN, normalize_name)
+
+Price = Annotated[int, Field(strict=True, ge=PRICE_MIN, le=PRICE_MAX)]
+Duration = Annotated[int, Field(strict=True, ge=DURATION_MIN, le=DURATION_MAX, multiple_of=DURATION_STEP)]
+EntityId = Annotated[int, Field(strict=True, ge=1, le=2_147_483_647)]
+
+
+class _CatalogInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    @field_validator("name", check_fields=False)
+    @classmethod
+    def _valid_name(cls, value: Optional[str]) -> Optional[str]:
+        # None solo llega en PATCH ({"name": null}): lo rechaza _PartialUpdate con un 422 claro
+        return None if value is None else normalize_name(value)
+
+
+class _PartialUpdate(_CatalogInput):
+    """PATCH: se manda solo lo que cambia; tiene que venir algo, y null no vale."""
+
+    @model_validator(mode="after")
+    def _something_and_no_nulls(self):
+        if not self.model_fields_set:
+            raise ValueError("No mandaste ningún cambio.")
+        nulls = [f for f in self.model_fields_set if getattr(self, f) is None]
+        if nulls:
+            raise ValueError(f"Estos campos no pueden ser null: {', '.join(sorted(nulls))}.")
+        return self
+
+
+class ServiceCreate(_CatalogInput):
+    name: str
+    price: Price
+    base_duration: Duration
+
+
+class ServiceUpdate(_PartialUpdate):
+    name: Optional[str] = None
+    price: Optional[Price] = None
+    base_duration: Optional[Duration] = None
+
+
+class ServiceOut(BaseModel):
+    id: int
+    name: str
+    price: int
+    base_duration: int
+    active: bool
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class ServiceStatusOut(BaseModel):
+    service: ServiceOut
+    changed: bool                 # False si ya estaba en ese estado
+    future_appointments: int      # turnos confirmados desde ahora que lo usan
+
+
+class DiscountPriceIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    service_id: EntityId
+    price: Price
+
+
+def _unique_services(prices: List[DiscountPriceIn]) -> List[DiscountPriceIn]:
+    ids = [p.service_id for p in prices]
+    if len(ids) != len(set(ids)):
+        raise ValueError("Hay un servicio repetido en la lista de precios.")
+    return prices
+
+
+class DiscountCreate(_CatalogInput):
+    name: str
+    prices: List[DiscountPriceIn] = Field(..., min_length=1, max_length=100)
+
+    @field_validator("prices")
+    @classmethod
+    def _check_prices(cls, prices):
+        return _unique_services(prices)
+
+
+class DiscountUpdate(_PartialUpdate):
+    name: Optional[str] = None
+    prices: Optional[List[DiscountPriceIn]] = Field(None, min_length=1, max_length=100)
+
+    @field_validator("prices")
+    @classmethod
+    def _check_prices(cls, prices):
+        return prices if prices is None else _unique_services(prices)
+
+
+class DiscountPriceOut(BaseModel):
+    service_id: int
+    service_name: str
+    service_active: bool
+    price: int
+
+
+class DiscountOut(BaseModel):
+    id: int
+    name: str
+    active: bool
+    prices: List[DiscountPriceOut]
+
+
+class DiscountStatusOut(BaseModel):
+    discount: DiscountOut
+    changed: bool
+    future_appointments: int
