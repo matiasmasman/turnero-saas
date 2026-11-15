@@ -8,6 +8,7 @@ API del catálogo (Entrega 3b): servicios y descuentos. SOLO el dueño (get_owne
 from typing import Annotated, List
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Request, status
+from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -16,9 +17,9 @@ from app.catalog import (current_business_id, future_appointments_for_discount,
 from app.core.telemetry import sec_logger
 from app.database import get_db
 from app.dependencies import get_owner
-from app.models import Discount, DiscountPrice, Service, User
+from app.models import BarberService, Discount, DiscountPrice, Service, User
 from app.schemas import (DiscountCreate, DiscountOut, DiscountPriceOut, DiscountStatusOut, DiscountUpdate,
-                         ServiceCreate, ServiceOut, ServiceStatusOut, ServiceUpdate)
+                         ServiceCreate, ServiceListOut, ServiceOut, ServiceStatusOut, ServiceUpdate)
 
 router = APIRouter(prefix="/admin/catalog", tags=["Catálogo (solo dueño)"])
 
@@ -63,10 +64,18 @@ def _service_snapshot(s: Service) -> dict:
     return {"name": s.name, "price": s.price, "base_duration": s.base_duration}
 
 
-@router.get("/services", response_model=List[ServiceOut])
+@router.get("/services", response_model=List[ServiceListOut])
 def list_services(db: Session = Depends(get_db), owner: User = Depends(get_owner)):
-    """Todos los servicios del negocio, activos e inactivos."""
-    return db.query(Service).filter(Service.business_id == current_business_id(owner)).order_by(Service.id).all()
+    """Todos los servicios del negocio, activos e inactivos, con cuántos barberos activos hacen cada uno."""
+    business_id = current_business_id(owner)
+    barbers = dict(db.query(BarberService.service_id, func.count(BarberService.employee_id))
+                   .join(User, User.id == BarberService.employee_id)
+                   .filter(BarberService.business_id == business_id, BarberService.active.is_(True),
+                           User.is_active.is_(True))
+                   .group_by(BarberService.service_id).all())
+    services = db.query(Service).filter(Service.business_id == business_id).order_by(Service.id).all()
+    return [ServiceListOut(id=s.id, name=s.name, price=s.price, base_duration=s.base_duration, active=s.active,
+                           barbers=barbers.get(s.id, 0)) for s in services]
 
 
 @router.post("/services", response_model=ServiceOut, status_code=status.HTTP_201_CREATED)

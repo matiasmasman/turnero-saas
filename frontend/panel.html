@@ -5,7 +5,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Panel de Barberos - Men's Club</title>
-    <link rel="stylesheet" href="css/panel.css?v=11">
+    <link rel="stylesheet" href="css/panel.css?v=12">
 </head>
 
 <body>
@@ -93,85 +93,64 @@
             <div id="agendaContent">Cargando...</div>
         </div>
 
-        <!-- VISTA SERVICIOS (PRECIOS SOLO DUEÑO + MIS SERVICIOS DE CADA BARBERO) -->
+        <!-- VISTA SERVICIOS (CATÁLOGO Y DESCUENTOS SOLO DUEÑO + MIS SERVICIOS DE CADA BARBERO) -->
         <section id="servicesSection" style="display: none;">
-            <!-- Tarjeta 1: Precios (Visible ÚNICAMENTE para el Dueño) -->
-            <div class="exceptions-card" id="ownerPricesCard" style="display: none; margin-bottom: 16px;">
+            <!-- Tarjeta 1: Servicios del local (SOLO Dueño). Sin onclick ni style: la conecta js/owner-catalog.js -->
+            <div class="exceptions-card owner-card" id="ownerServicesCard" hidden>
                 <div class="exc-header">
                     <div class="exc-header-titles">
-                        <h2>Precios de Servicios</h2>
-                        <p>VALORES GENERALES Y PROMOCIONES</p>
+                        <h2>Servicios del local</h2>
+                        <p>PRECIO Y DURACIÓN BASE</p>
                     </div>
                     <div class="exc-nav-pills">
-                        <button type="button" class="control-pill" onclick="showMetrics()">
-                            📊 Métricas
-                        </button>
-                        <button type="button" class="control-pill" onclick="showSchedule()">
-                            🕒 Horarios
-                        </button>
-                        <button type="button" class="control-pill" onclick="showExceptions()">
-                            🚫 Excepciones
-                        </button>
-                        <button type="button" class="control-pill" onclick="showDashboard()">
-                            📅 Turnos
-                        </button>
+                        <button type="button" class="control-pill" data-go="metrics">📊 Métricas</button>
+                        <button type="button" class="control-pill" data-go="schedule">🕒 Horarios</button>
+                        <button type="button" class="control-pill" data-go="exceptions">🚫 Excepciones</button>
+                        <button type="button" class="control-pill" data-go="dashboard">📅 Turnos</button>
                     </div>
                 </div>
 
                 <div class="exc-hint">
-                    <span>Los precios generales se muestran en la web pública. Las tarifas <strong>Promo 2x</strong> y <strong>VIP</strong> se aplican con un clic desde la agenda.</span>
+                    <span>Los servicios que ofrece la barbería. Desactivar no borra nada: los turnos ya reservados
+                        siguen igual y lo podés reactivar cuando quieras. Por ahora la web pública y la agenda siguen
+                        usando los precios de antes: esto se va a usar con la reserva nueva.</span>
                 </div>
 
-                <form id="pricesForm">
-                    <div class="schedule-days-box">
-                        <div class="schedule-day-item">
-                            <div class="schedule-day-header">
-                                <span class="day-name-text">Corte Normal ($)</span>
-                                <input type="number" id="priceCorte" class="time-input"
-                                    style="max-width: 140px; text-align: right;" min="0" step="500" required>
-                            </div>
-                        </div>
-
-                        <div class="schedule-day-item">
-                            <div class="schedule-day-header">
-                                <span class="day-name-text">Corte Promo 2x — c/u ($)</span>
-                                <input type="number" id="priceCortePromo2x" class="time-input"
-                                    style="max-width: 140px; text-align: right;" min="0" step="500" required>
-                            </div>
-                        </div>
-
-                        <div class="schedule-day-item">
-                            <div class="schedule-day-header">
-                                <span class="day-name-text">Corte VIP ($)</span>
-                                <input type="number" id="priceCorteVip" class="time-input"
-                                    style="max-width: 140px; text-align: right;" min="0" step="500" required>
-                            </div>
-                        </div>
-
-                        <div class="schedule-day-item">
-                            <div class="schedule-day-header">
-                                <span class="day-name-text">Barba ($)</span>
-                                <input type="number" id="priceBarba" class="time-input"
-                                    style="max-width: 140px; text-align: right;" min="0" step="500" required>
-                            </div>
-                        </div>
-
-                        <div class="schedule-day-item">
-                            <div class="schedule-day-header">
-                                <span class="day-name-text">Corte + Barba ($)</span>
-                                <input type="number" id="priceCorteBarba" class="time-input"
-                                    style="max-width: 140px; text-align: right;" min="0" step="500" required>
-                            </div>
-                        </div>
-                    </div>
-
-                    <button type="submit" class="btn-add-exception" style="margin-top: 16px;">
-                        Guardar Precios
-                    </button>
-                </form>
+                <p id="ownerServicesStatus" class="my-services-status" role="status" hidden></p>
+                <div class="schedule-days-box" id="ownerServicesList">
+                    <p class="empty-exceptions">Cargando...</p>
+                </div>
+                <div id="ownerServiceNew"></div>
+                <button type="button" id="ownerServiceAddBtn" class="btn-add-exception owner-add-btn">
+                    + Agregar servicio
+                </button>
             </div>
 
-            <!-- Tarjeta 2: Mis servicios (Dueño y Empleados): qué servicios hago y cuánto tardo en cada uno.
+            <!-- Tarjeta 2: Descuentos (SOLO Dueño): un precio final por servicio -->
+            <div class="exceptions-card owner-card" id="ownerDiscountsCard" hidden>
+                <div class="exc-header">
+                    <div class="exc-header-titles">
+                        <h2>Descuentos</h2>
+                        <p>PRECIO FINAL POR SERVICIO</p>
+                    </div>
+                </div>
+
+                <div class="exc-hint">
+                    <span>Cada descuento tiene un precio final para los servicios a los que aplica (por ejemplo,
+                        "Promo 2x": Corte a $12.000). Por ahora las tarifas de la agenda siguen como antes.</span>
+                </div>
+
+                <p id="ownerDiscountsStatus" class="my-services-status" role="status" hidden></p>
+                <div class="schedule-days-box" id="ownerDiscountsList">
+                    <p class="empty-exceptions">Cargando...</p>
+                </div>
+                <div id="ownerDiscountNew"></div>
+                <button type="button" id="ownerDiscountAddBtn" class="btn-add-exception owner-add-btn">
+                    + Agregar descuento
+                </button>
+            </div>
+
+            <!-- Tarjeta 3: Mis servicios (Dueño y Empleados): qué servicios hago y cuánto tardo en cada uno.
                  Sin onclick: los botones los conecta js/my-services.js con addEventListener. -->
             <div class="exceptions-card" id="myServicesCard">
                 <div class="exc-header">
@@ -383,8 +362,9 @@
         </section>
     </div>
 
-    <script src="js/panel.js?v=11"></script>
+    <script src="js/panel.js?v=12"></script>
     <script src="js/my-services.js?v=1"></script>
+    <script src="js/owner-catalog.js?v=1"></script>
 </body>
 
 </html>

@@ -708,7 +708,8 @@ function renderDonutCharts(data) {
 }
 
 // ==========================================
-// VISTA SERVICIOS (PRECIOS DUEÑO + MIS SERVICIOS DE CADA BARBERO)
+// VISTA SERVICIOS (CATÁLOGO Y DESCUENTOS DEL DUEÑO + MIS SERVICIOS DE CADA BARBERO)
+// "Servicios del local" y "Descuentos" están en js/owner-catalog.js (loadOwnerCatalog, solo dueño)
 // "Mis servicios" está en js/my-services.js (loadMyServices)
 // ==========================================
 
@@ -722,18 +723,23 @@ async function showServices() {
     }
 
     const isOwner = currentUser && String(currentUser.role || '').toLowerCase() === 'owner';
-    const ownerPricesCard = document.getElementById('ownerPricesCard');
     const empNavPills = document.getElementById('empServicesNavPills');
 
-    if (ownerPricesCard) {
-        ownerPricesCard.style.display = isOwner ? 'block' : 'none';
-    }
+    ['ownerServicesCard', 'ownerDiscountsCard'].forEach(id => {
+        const card = document.getElementById(id);
+        if (card) card.hidden = !isOwner;
+    });
     if (empNavPills) {
         empNavPills.style.display = isOwner ? 'none' : 'flex';
     }
 
-    await Promise.all([loadMyServices(), loadServicePrices(token)]);
+    const loads = [loadMyServices()];
+    if (isOwner) loads.push(loadOwnerCatalog());
+    await Promise.all(loads);
 }
+
+// Precios VIEJOS (users.price_*): los sigue usando la agenda (botón de tarifa) hasta el 3f.
+// Ya no hay pantalla para editarlos: el catálogo nuevo está en "Servicios del local".
 
 async function loadServicePrices(token) {
     try {
@@ -749,65 +755,11 @@ async function loadServicePrices(token) {
                 price_barba: data.price_barba ?? 10000,
                 price_corte_barba: data.price_corte_barba ?? 18000
             };
-
-            const elCorte = document.getElementById('priceCorte');
-            const elPromo2x = document.getElementById('priceCortePromo2x');
-            const elVip = document.getElementById('priceCorteVip');
-            const elBarba = document.getElementById('priceBarba');
-            const elCorteBarba = document.getElementById('priceCorteBarba');
-
-            if (elCorte) elCorte.value = shopPrices.price_corte;
-            if (elPromo2x) elPromo2x.value = shopPrices.price_corte_promo2x;
-            if (elVip) elVip.value = shopPrices.price_corte_vip;
-            if (elBarba) elBarba.value = shopPrices.price_barba;
-            if (elCorteBarba) elCorteBarba.value = shopPrices.price_corte_barba;
         }
     } catch (err) {
         console.error("Error al cargar precios:", err);
     }
 }
-
-document.getElementById('pricesForm')?.addEventListener('submit', async function (e) {
-    e.preventDefault();
-
-    const payload = {
-        price_corte: parseInt(document.getElementById('priceCorte').value, 10) || 0,
-        price_corte_promo2x: parseInt(document.getElementById('priceCortePromo2x').value, 10) || 0,
-        price_corte_vip: parseInt(document.getElementById('priceCorteVip').value, 10) || 0,
-        price_barba: parseInt(document.getElementById('priceBarba').value, 10) || 0,
-        price_corte_barba: parseInt(document.getElementById('priceCorteBarba').value, 10) || 0
-    };
-
-    const token = localStorage.getItem('access_token');
-
-    try {
-        const response = await fetch(`${API_URL}/admin/service-prices`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${token}`
-            },
-            body: JSON.stringify(payload)
-        });
-
-        if (response.ok) {
-            const updated = await response.json();
-            shopPrices = {
-                price_corte: updated.price_corte,
-                price_corte_promo2x: updated.price_corte_promo2x,
-                price_corte_vip: updated.price_corte_vip,
-                price_barba: updated.price_barba,
-                price_corte_barba: updated.price_corte_barba
-            };
-            alert('Precios y promociones actualizados correctamente');
-        } else {
-            const error = await response.json();
-            alert('Error al guardar precios: ' + (error.detail || JSON.stringify(error)));
-        }
-    } catch (err) {
-        alert('Error de conexión con el servidor.');
-    }
-});
 
 // ==========================================
 // GESTIÓN DE HORARIO HABITUAL

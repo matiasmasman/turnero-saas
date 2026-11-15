@@ -1,13 +1,16 @@
 import json
 import logging
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 import sys
 
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
 LOG_DIR = BASE_DIR / "logs"
-LOG_DIR.mkdir(exist_ok=True)
-LOG_FILE = LOG_DIR / "security.log"
+# SECURITY_LOG_FILE la usan solo las pruebas de navegador (log en una carpeta temporal).
+# Sin la variable, es logs/security.log como siempre.
+LOG_FILE = Path(os.getenv("SECURITY_LOG_FILE") or LOG_DIR / "security.log")
+LOG_FILE.parent.mkdir(exist_ok=True)
 
 class SecurityJSONFormatter(logging.Formatter):
     def format(self, record: logging.LogRecord) -> str:

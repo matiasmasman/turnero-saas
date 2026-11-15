@@ -284,6 +284,11 @@ class ServiceOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class ServiceListOut(ServiceOut):
+    """GET /admin/catalog/services (3d): además, cuántos barberos ACTIVOS lo hacen hoy (para avisar si ninguno)."""
+    barbers: int
+
+
 class ServiceStatusOut(BaseModel):
     service: ServiceOut
     changed: bool                 # False si ya estaba en ese estado
