@@ -116,7 +116,7 @@ class WaNotification(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     appointment_id = Column(Integer, ForeignKey("appointments.id", ondelete="CASCADE"), nullable=True)
-    kind = Column(String, nullable=False)                # confirmation | reminder | autoreply | invalid_code | cancel_*
+    kind = Column(String, nullable=False)                # confirmation | reminder | autoreply | invalid_code | already_confirmed | cancel_*
     to_jid = Column(String, nullable=False)
     body = Column(Text, nullable=True)                   # texto ya armado (mensajes de cancelación); si es None se arma al enviar
     scheduled_at = Column(DateTime, index=True, nullable=False)   # UTC

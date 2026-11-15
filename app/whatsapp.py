@@ -49,6 +49,9 @@ MAX_INBOUND_ATTEMPTS = 3                      # intentos para procesar un mensaj
 INBOUND_RETRY_GAP = timedelta(seconds=60)     # espera mínima entre intentos de un mismo mensaje
 CANCEL_DEADLINE = timedelta(hours=1)          # se puede cancelar hasta 1 h antes
 CANCEL_CONFIRM_WINDOW = timedelta(minutes=15)  # tiempo para responder SI
+ALREADY_CONFIRMED_GAP = timedelta(minutes=10)  # "tu turno ya está confirmado": máximo 1 cada 10 min por chat
+MAX_CODE_REPLIES_PER_DAY = 5                   # respuestas a códigos que no sirven, por chat y por día
+MAX_CANCEL_REPLIES_PER_DAY = 10                # respuestas a CANCELAR, por chat y por día
 LOCK_FILE = Path(__file__).resolve().parent.parent / "logs" / ".wa_dispatcher.lock"
 
 # Sin 0/O, 1/I/L para que no se confundan
@@ -100,11 +103,13 @@ def words_of(text: str) -> list:
     return re.findall(r"[A-Z]+", plain.upper())
 
 
-CANCEL_WORDS = {"CANCELAR", "CANCELA", "CANCELO"}
+CANCEL_WORDS = {"CANCELAR", "CANCELA", "CANCELO", "CANCELAME",
+                "ANULAR", "ANULA", "ANULO", "ANULAME"}
 
 
 def is_cancel_command(words: list) -> bool:
-    # "CANCELAR", "cancelá", "cancelar turno", "quiero cancelar mi turno"... pero no "no quiero cancelar".
+    # "CANCELAR", "cancelá", "cancelame", "anulá el turno", "quiero cancelar mi turno"...
+    # pero no "no quiero cancelar".
     # Si se equivoca no pasa nada: igual el cliente tiene que confirmar con SI.
     return (0 < len(words) <= 6 and "NO" not in words
             and any(w in CANCEL_WORDS for w in words[:3]))
@@ -149,7 +154,8 @@ def create_optin_link(db, appointment: Appointment) -> Optional[str]:
 
 # ---------- Textos ----------
 def first_name(appt: Appointment) -> str:
-    return (appt.client_name or "").strip().split(" ")[0][:30] or "hola"
+    name = (appt.client_name or "").strip().split(" ")[0][:30]
+    return name[:1].upper() + name[1:] if name else "hola"   # "prueba" -> "Prueba"; el resto se respeta
 
 
 def appt_parts(appt: Appointment):
@@ -159,6 +165,40 @@ def appt_parts(appt: Appointment):
 
 
 CANCEL_HINT = "Si no podés venir, respondé CANCELAR."
+CALL_HINT = "Si no podés venir, avisale a la barbería."
+
+# Respuestas a un código bien escrito que no sirve (todas cuentan para el mismo límite diario)
+CODE_TEXTS = {
+    "past": "Ese turno ya pasó. Si querés uno nuevo, reservá en la página.",
+    "cancelled": "Ese turno fue cancelado. Si querés uno nuevo, reservá en la página.",
+    "used": "Ese código ya se usó desde otro número. Los avisos de ese turno le llegan a ese número.",
+    "unknown": ("No encontré ese código. Revisá que esté bien escrito o volvé a tocar "
+                "el botón de WhatsApp en la página de reservas."),
+}
+
+
+def render_already_confirmed(appt: Appointment) -> str:
+    fecha, hora, barber = appt_parts(appt)
+    return f"Tu turno ya está confirmado ✅ {fecha} a las {hora} con {barber}."
+
+
+def reminder_plan(db, appt: Appointment, now: datetime) -> Optional[str]:
+    """Qué recordatorio va a salir para este turno según la cola: '2h', 'night' o None (ninguno)."""
+    r = (db.query(WaNotification)
+         .filter(WaNotification.appointment_id == appt.id, WaNotification.kind == "reminder",
+                 WaNotification.status == "pending")
+         .first())
+    if r is None:
+        return None
+    when = r.scheduled_at
+    correct = reminder_time_utc(appt)
+    if abs((correct - when).total_seconds()) > 60 and correct > now:
+        when = correct  # el turno se reprogramó: _send_one lo va a mandar a esta hora
+    start = appointment_start_utc(appt)
+    if when >= start:
+        return None     # no va a salir: _send_one lo cancela
+    to_local = lambda d: d.replace(tzinfo=timezone.utc).astimezone(TZ).date()  # noqa: E731
+    return "night" if to_local(when) < to_local(start) else "2h"
 
 
 def render_cancel(kind: str, appt: Optional[Appointment] = None) -> str:
@@ -182,29 +222,35 @@ def render_cancel(kind: str, appt: Optional[Appointment] = None) -> str:
             "Si reservaste desde otro número, comunicate con la barbería.")
 
 
-def render(kind: str, appt: Optional[Appointment]) -> str:
+def render(kind: str, appt: Optional[Appointment], reminder: Optional[str] = None, late: bool = False) -> str:
+    """reminder ('2h', 'night' o None) y late (faltan menos de 1 h) solo se usan en la confirmación."""
     if kind == "autoreply":
         extra = " Para cancelar un turno, respondé CANCELAR." if CANCEL_ENABLED else ""
         return (f"Hola! Este número solo envía confirmaciones y recordatorios de turnos de {BUSINESS_NAME}. "
                 f"Para consultas o cambios, comunicate directamente con la barbería.{extra}")
     if kind == "invalid_code":
-        return "No encontré ese turno. Volvé a tocar el botón de WhatsApp que aparece al reservar en la página."
+        # Desde el Bloque 2 el texto va armado en body; esto queda para filas viejas que estén en la cola
+        return CODE_TEXTS["unknown"]
     start = datetime.strptime(f"{appt.date} {appt.time[:5]}", "%Y-%m-%d %H:%M")
     hora = start.strftime("%H:%M")
     barber = appt.employee_name
     if kind == "confirmation":
         fecha = f"{WEEKDAYS[start.weekday()]} {start.strftime('%d/%m')}"
-        return (f"¡Hola {first_name(appt)}! Tu turno en {BUSINESS_NAME} quedó confirmado ✂️\n"
-                f"📅 {fecha} a las {hora}\n"
-                f"💈 {barber} · {appt.service}\n"
-                "Te vamos a recordar 2 horas antes por acá."
-                + (f"\n{CANCEL_HINT}" if CANCEL_ENABLED else ""))
+        lines = [f"¡Hola {first_name(appt)}! Tu turno en {BUSINESS_NAME} quedó confirmado ✂️",
+                 f"📅 {fecha} a las {hora}",
+                 f"💈 {barber} · {appt.service}"]
+        if reminder == "2h":
+            lines.append("Te vamos a recordar 2 horas antes por acá.")
+        elif reminder == "night":
+            lines.append("Te vamos a recordar la noche anterior por acá.")
+        lines.append(CANCEL_HINT if CANCEL_ENABLED and not late else CALL_HINT)
+        return "\n".join(lines)
     # reminder
     reminder_local = datetime.now(TZ)
     dia = "hoy" if reminder_local.date() == start.date() else "mañana"
     return (f"Hola {first_name(appt)}, te recordamos tu turno de {dia} a las {hora} "
             f"en {BUSINESS_NAME} con {barber}. ¡Te esperamos! "
-            + (CANCEL_HINT if CANCEL_ENABLED else "Si no podés venir, avisale a la barbería."))
+            + (CANCEL_HINT if CANCEL_ENABLED else CALL_HINT))
 
 
 # ---------- Cliente del cartero (HTTP sobre socket Unix) ----------
@@ -247,6 +293,8 @@ class Dispatcher:
         self._last_autoreply = {}   # jid -> momento (solo 1 por día)
         self._invalid = {}          # jid -> (día, intentos)
         self._pending_cancel = {}   # jid -> (appointment_id o None, vence)
+        self._last_confirmed = {}   # jid -> último "tu turno ya está confirmado" (1 cada 10 min)
+        self._cancel_replies = {}   # jid -> (día, respuestas a CANCELAR)
         self._inbound_failures = {} # id del mensaje -> (intentos fallidos, no reintentar antes de)
         self._unacked = set()       # ids ya procesados cuyo ack falló: solo se reenvía el ack
         self._was_down = False
@@ -356,9 +404,10 @@ class Dispatcher:
     def _process_one(self, item: dict) -> bool:
         """Procesa un mensaje por separado. True = marcarlo como leído (salió bien o se descartó)."""
         msg_id, jid = item.get("id"), item.get("jid")
-        # Las tres memorias usan el jid como clave y sus valores no se modifican en el lugar
+        # Las cinco memorias usan el jid como clave y sus valores no se modifican en el lugar
         # (datetime y tuplas), así que alcanza con guardar el valor tal cual.
-        memory = (self._last_autoreply, self._invalid, self._pending_cancel)
+        memory = (self._last_autoreply, self._invalid, self._pending_cancel, self._last_confirmed,
+                  self._cancel_replies)
         before = [d.get(jid, _MISSING) for d in memory]
         db = SessionLocal()
         try:
@@ -420,20 +469,29 @@ class Dispatcher:
 
         optin = db.query(WaOptin).filter(WaOptin.code == code).first()
         appt = db.query(Appointment).filter(Appointment.id == optin.appointment_id).first() if optin else None
-        valid = appt is not None and appt.status == "confirmed" and appointment_start_utc(appt) > now
 
-        if valid and optin.jid == jid:
-            return  # ya estaba anotado (tocó el botón dos veces)
+        if appt is None:
+            reason = "unknown"
+        elif appt.status != "confirmed":
+            reason = "cancelled"      # gana aunque además ya haya pasado
+        elif appointment_start_utc(appt) <= now:
+            reason = "past"
+        elif optin.jid == jid:
+            self._already_confirmed(db, jid, appt, now)  # ya estaba anotado (mandó el código otra vez)
+            return
+        elif optin.jid is not None:
+            reason = "used"
+        else:
+            reason = None             # código bueno y libre: se anota abajo
 
-        if not valid or optin.jid is not None:
-            reused = valid and optin.jid is not None
+        if reason:
             day, count = self._invalid.get(jid, (now.date(), 0))
             count = count + 1 if day == now.date() else 1
             self._invalid[jid] = (now.date(), count)
-            log("warning", "WA_OPTIN_CODE_REUSE" if reused else "WA_OPTIN_INVALID_CODE",
-                "Código de turno ajeno o inválido", jid=mask(jid), attempts_today=count)
-            if count <= 5:
-                self._queue(db, "invalid_code", jid)
+            log("warning", "WA_OPTIN_CODE_REUSE" if reason == "used" else "WA_OPTIN_INVALID_CODE",
+                "Código de turno ajeno o inválido", jid=mask(jid), attempts_today=count, reason=reason)
+            if count <= MAX_CODE_REPLIES_PER_DAY:
+                self._queue(db, "invalid_code", jid, body=CODE_TEXTS[reason])
                 db.commit()
             return
 
@@ -446,6 +504,20 @@ class Dispatcher:
             self._queue(db, "reminder", jid, appt_id, reminder_at)
         db.commit()
         log("info", "WA_OPTIN", "Cliente pidió avisos por WhatsApp", appointment_id=appt_id, jid=mask(jid))
+
+    def _already_confirmed(self, db, jid: str, appt: Appointment, now: datetime):
+        """Mismo código desde el mismo chat con el turno vigente: se lo recordamos (1 cada 10 min)."""
+        last = self._last_confirmed.get(jid)
+        if last and now - last < ALREADY_CONFIRMED_GAP:
+            return  # ya le contestamos hace poco: silencio
+        # Limpieza: olvidamos los que ya pasaron los 10 minutos (no crece sin límite)
+        for j, t in list(self._last_confirmed.items()):
+            if now - t >= ALREADY_CONFIRMED_GAP:
+                del self._last_confirmed[j]
+        self._last_confirmed[jid] = now
+        # Sin appointment_id: la cola admite un solo aviso por (turno, tipo) y esto se puede repetir
+        self._queue(db, "already_confirmed", jid, body=render_already_confirmed(appt))
+        db.commit()
 
     # --- Cancelación por WhatsApp (v2.2) ---
     def _next_appointment(self, db, jid: str, now: datetime) -> Optional[Appointment]:
@@ -462,10 +534,17 @@ class Dispatcher:
         for j, (_, exp) in list(self._pending_cancel.items()):
             if now - exp > timedelta(days=1):
                 del self._pending_cancel[j]
-        pending = self._pending_cancel.get(jid)
-        if pending and pending[1] > now:
-            return  # ya le contestamos hace menos de 15 min: no repetimos
+        day, count = self._cancel_replies.get(jid, (now.date(), 0))
+        count = count + 1 if day == now.date() else 1
+        self._cancel_replies[jid] = (now.date(), count)
+        if count > MAX_CANCEL_REPLIES_PER_DAY:
+            if count == MAX_CANCEL_REPLIES_PER_DAY + 1:   # se avisa una sola vez por día
+                log("warning", "WA_CANCEL_RATE_LIMITED", "Demasiados CANCELAR hoy: dejamos de contestar",
+                    jid=mask(jid))
+            return  # silencio; si había una pregunta esperando, el SI sigue valiendo en su plazo
 
+        # Si repite CANCELAR se contesta de nuevo como la primera vez: si hay turno, se vuelve a
+        # preguntar y los 15 minutos para el SI arrancan otra vez (lo pisa la línea de abajo).
         appt = self._next_appointment(db, jid, now)
         if appt is None:
             kind, appt_id = "cancel_none", None
@@ -547,7 +626,14 @@ class Dispatcher:
                     db.commit()
                     return
 
-        text = n.body or render(n.kind, appt)
+        if n.body:
+            text = n.body
+        elif n.kind == "confirmation":
+            # Se arma al enviar: el recordatorio puede no estar (turno cercano) o salir la noche anterior
+            text = render("confirmation", appt, reminder=reminder_plan(db, appt, now),
+                          late=appointment_start_utc(appt) - now < CANCEL_DEADLINE)
+        else:
+            text = render(n.kind, appt)
         n.status, n.attempts = "sending", (n.attempts or 0) + 1
         db.commit()
 

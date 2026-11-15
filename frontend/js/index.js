@@ -191,7 +191,12 @@ document.addEventListener('DOMContentLoaded', async () => {
 
         const hint = document.createElement('p');
         hint.className = 'wa-hint';
-        hint.textContent = 'Se abre WhatsApp con el mensaje listo: solo tocá enviar. Te confirmamos el turno y te lo recordamos 2 horas antes.';
+        hint.textContent = 'Se abre WhatsApp con el mensaje listo: solo tocá enviar. Te confirmamos el turno y te mandamos un recordatorio.';
+
+        // Texto fijo (textContent, sin datos del turno)
+        const retry = document.createElement('p');
+        retry.className = 'wa-hint';
+        retry.textContent = 'Si en 1 minuto no te llega la confirmación por WhatsApp, mandá el código de nuevo.';
 
         const back = document.createElement('button');
         back.type = 'button';
@@ -202,7 +207,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             appointmentForm.hidden = false;
         });
 
-        panel.append(title, detail, btn, hint, back);
+        panel.append(title, detail, btn, hint, retry, back);
         appointmentForm.hidden = true;
         appointmentForm.insertAdjacentElement('afterend', panel);
     }
