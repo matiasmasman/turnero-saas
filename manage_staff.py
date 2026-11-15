@@ -4,6 +4,7 @@ import argparse
 from datetime import time
 from passlib.context import CryptContext
 
+from app.core.schema import missing_migrations
 from app.database import SessionLocal, engine, Base
 from app.models import User, UserRole, WorkingHours
 
@@ -90,6 +91,9 @@ def cmd_init(default_password: str):
 
         db.commit()
         print("\n[OK] Staff y horarios (Lun-Sáb 10:00-13:00 y 17:00-20:30) listos en la base de datos.\n")
+        if missing_migrations(engine):
+            print("[!] Falta la migración de la Entrega 3. Antes de arrancar la app corré:\n"
+                  "    venv/bin/python -m scripts.migrate_e3\n")
     except Exception as e:
         db.rollback()
         print(f"[ERROR] Falló la inicialización: {e}")
@@ -146,6 +150,9 @@ def cmd_add(name: str, username: str, password: str, role_str: str):
         seed_working_hours(db, new_user.id)
         db.commit()
         print(f"[✓] Usuario '{name}' ({username}) dado de alta con horario 10:00-13:00 y 17:00-20:30.")
+        # Entrega 3: un barbero nuevo arranca sin servicios en el catálogo (barber_services);
+        # los elige él en "Mis servicios" cuando esa pantalla exista (sub-bloque 3c).
+        print("    Nota: todavía no tiene servicios asignados en el catálogo nuevo.")
     except Exception as e:
         db.rollback()
         print(f"[ERROR] No se pudo crear el usuario: {e}")

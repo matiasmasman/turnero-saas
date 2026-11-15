@@ -81,6 +81,24 @@ python manage_staff.py toggle --username leo
 
 ---
 
+## 🗄️ Migraciones de la base de datos
+
+La app **no crea tablas sola**: si a la base le falta una migración, no arranca y dice qué correr.
+
+```bash
+# Base nueva (vacía): crear tablas y staff, y después migrar
+python manage_staff.py init
+python -m scripts.migrate_e3
+
+# Base existente: con la app parada, simular y después aplicar
+python -m scripts.migrate_e3 --dry-run
+python -m scripts.migrate_e3
+```
+
+El script corre todo en una sola transacción (si algo falla no queda nada a medias), verifica que no se perdió ningún dato y se puede correr dos veces sin efecto.
+
+---
+
 ## 📂 Estructura del Proyecto
 
 ```text

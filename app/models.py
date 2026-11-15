@@ -1,8 +1,14 @@
 import enum
-from datetime import datetime
-from sqlalchemy import Column, Integer, String, Boolean, Enum, ForeignKey, DateTime, Time, Text, UniqueConstraint
+from datetime import datetime, timezone
+from sqlalchemy import (Column, Integer, String, Boolean, Enum, ForeignKey, DateTime, Time, Text,
+                        UniqueConstraint, CheckConstraint, ForeignKeyConstraint, Index, func, true)
 from sqlalchemy.orm import relationship
 from app.database import Base
+
+
+def utc_now() -> datetime:
+    """Momento actual en UTC, con zona (para las tablas nuevas de la Entrega 3)."""
+    return datetime.now(timezone.utc)
 
 # Definimos los dos roles posibles
 class UserRole(str, enum.Enum):
@@ -47,6 +53,14 @@ class Appointment(Base):
     price = Column(Integer, nullable=False, default=15000)  # Precio congelado al reservar
     status = Column(String, default="confirmed")            # confirmed | cancelled (canceló por WhatsApp)
     employee_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+
+    # Entrega 3 (3a): se agregan nulas; en 3a nadie las escribe salvo la migración.
+    # service (texto), price y duration quedan como están: son el "congelado" del turno.
+    service_id = Column(Integer, ForeignKey("services.id", name="fk_appointments_service_id",
+                                            ondelete="RESTRICT"), nullable=True)
+    discount_id = Column(Integer, ForeignKey("discounts.id", name="fk_appointments_discount_id",
+                                             ondelete="RESTRICT"), nullable=True)
+    discount_name = Column(String(40), nullable=True)       # nombre del descuento al reservar
 
     employee = relationship("User", back_populates="appointments")
 
@@ -126,3 +140,119 @@ class WaNotification(Base):
     sent_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+
+# ==========================================
+# ENTREGA 3 — catálogo de servicios y descuentos (3a: solo datos)
+# Servicios y descuentos nunca se borran: se desactivan (active = false).
+# ==========================================
+
+
+class Business(Base):
+    """El negocio (hoy uno solo: id 1, 'mensclub')."""
+    __tablename__ = "businesses"
+
+    id = Column(Integer, primary_key=True)
+    slug = Column(String(40), nullable=False, unique=True)
+    name = Column(String(80), nullable=False)
+    active = Column(Boolean, nullable=False, default=True, server_default=true())
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utc_now, server_default=func.now())
+
+
+class Service(Base):
+    """Un servicio del catálogo: nombre, precio de lista y duración sugerida."""
+    __tablename__ = "services"
+    __table_args__ = (
+        # Permite que otras tablas exijan "servicio de ESTE negocio" con una FK de dos columnas
+        UniqueConstraint("business_id", "id", name="uq_services_business_id_id"),
+        CheckConstraint("price >= 0", name="ck_services_price"),
+        CheckConstraint("base_duration > 0", name="ck_services_base_duration"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    business_id = Column(Integer, ForeignKey("businesses.id", name="fk_services_business_id",
+                                             ondelete="RESTRICT"), nullable=False)
+    name = Column(String(40), nullable=False)
+    price = Column(Integer, nullable=False)              # pesos, entero
+    base_duration = Column(Integer, nullable=False)      # minutos
+    active = Column(Boolean, nullable=False, default=True, server_default=true())
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utc_now, server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=utc_now, onupdate=utc_now,
+                        server_default=func.now())
+
+
+class Discount(Base):
+    """Un descuento (ej. 'Promo 2x'). Su precio por servicio está en discount_prices."""
+    __tablename__ = "discounts"
+    __table_args__ = (
+        UniqueConstraint("business_id", "id", name="uq_discounts_business_id_id"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    business_id = Column(Integer, ForeignKey("businesses.id", name="fk_discounts_business_id",
+                                             ondelete="RESTRICT"), nullable=False)
+    name = Column(String(40), nullable=False)
+    active = Column(Boolean, nullable=False, default=True, server_default=true())
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utc_now, server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=utc_now, onupdate=utc_now,
+                        server_default=func.now())
+
+
+# Nombre único por negocio sin distinguir mayúsculas ("Corte" y "corte" chocan).
+# Ojo: en SQLite lower() solo pasa a minúscula A-Z (no Á/Ñ); en PostgreSQL sí. La API de 3b
+# también lo valida en Python con casefold(), así que la regla es la misma en las dos bases.
+Index("uq_services_business_lower_name", Service.business_id, func.lower(Service.name), unique=True)
+Index("uq_discounts_business_lower_name", Discount.business_id, func.lower(Discount.name), unique=True)
+
+
+class DiscountPrice(Base):
+    """Precio final de un descuento para un servicio. Sin fila = el descuento no aplica a ese servicio."""
+    __tablename__ = "discount_prices"
+    __table_args__ = (
+        # Las dos FKs incluyen business_id: el descuento y el servicio tienen que ser del mismo negocio
+        ForeignKeyConstraint(["business_id", "discount_id"], ["discounts.business_id", "discounts.id"],
+                             name="fk_discount_prices_discount", ondelete="RESTRICT"),
+        ForeignKeyConstraint(["business_id", "service_id"], ["services.business_id", "services.id"],
+                             name="fk_discount_prices_service", ondelete="RESTRICT"),
+        CheckConstraint("price >= 0", name="ck_discount_prices_price"),
+        Index("ix_discount_prices_service", "business_id", "service_id"),
+    )
+
+    business_id = Column(Integer, ForeignKey("businesses.id", name="fk_discount_prices_business_id",
+                                             ondelete="RESTRICT"), nullable=False)
+    discount_id = Column(Integer, primary_key=True)
+    service_id = Column(Integer, primary_key=True)
+    price = Column(Integer, nullable=False)              # precio final, pesos
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utc_now, server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=utc_now, onupdate=utc_now,
+                        server_default=func.now())
+
+
+class BarberService(Base):
+    """Qué servicios hace cada barbero y cuánto tarda. active=false: dejó de hacerlo (se recuerda la duración)."""
+    __tablename__ = "barber_services"
+    __table_args__ = (
+        ForeignKeyConstraint(["business_id", "service_id"], ["services.business_id", "services.id"],
+                             name="fk_barber_services_service", ondelete="RESTRICT"),
+        CheckConstraint("duration > 0", name="ck_barber_services_duration"),
+        Index("ix_barber_services_service", "business_id", "service_id"),
+    )
+
+    business_id = Column(Integer, ForeignKey("businesses.id", name="fk_barber_services_business_id",
+                                             ondelete="RESTRICT"), nullable=False)
+    employee_id = Column(Integer, ForeignKey("users.id", name="fk_barber_services_employee_id",
+                                             ondelete="CASCADE"), primary_key=True)
+    service_id = Column(Integer, primary_key=True)
+    duration = Column(Integer, nullable=False)           # minutos de ESTE barbero para ESTE servicio
+    active = Column(Boolean, nullable=False, default=True, server_default=true())
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utc_now, server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=utc_now, onupdate=utc_now,
+                        server_default=func.now())
+
+
+class SchemaMigration(Base):
+    """Migraciones de esquema ya aplicadas (una fila por migración)."""
+    __tablename__ = "schema_migrations"
+
+    id = Column(String(64), primary_key=True)
+    applied_at = Column(DateTime(timezone=True), nullable=False, default=utc_now, server_default=func.now())

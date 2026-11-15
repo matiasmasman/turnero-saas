@@ -3,15 +3,16 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from app.core.middleware import SecurityTelemetryMiddleware
+from app.core.schema import ensure_schema_ready
 from app.core.telemetry import sec_logger
 from app.database import engine
-import app.models as models
 from app.routers import auth, appointments, admin
 from app.whatsapp import dispatcher
 from fastapi.staticfiles import StaticFiles
 
-# Crea las tablas en la base de datos (incluye las nuevas de WhatsApp)
-models.Base.metadata.create_all(bind=engine)
+# La app ya no crea tablas: si falta una migración, no arranca (igual que sin SECRET_KEY).
+# Las tablas se crean con manage_staff.py init (base nueva) y scripts/migrate_e3.py.
+ensure_schema_ready(engine)
 
 
 @asynccontextmanager
