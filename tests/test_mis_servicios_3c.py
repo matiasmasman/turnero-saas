@@ -220,8 +220,7 @@ def test_las_filas_de_servicios_desactivados_no_se_tocan(api, staff):
 def test_desmarcar_todos_se_permite_con_aviso(api, staff):
     resp = put(api, staff["emp_a"], [])
     assert resp.status_code == 200 and resp.json()["changed"] is True
-    assert resp.json()["warnings"] == ["No tenés ningún servicio marcado: cuando se active la reserva nueva, "
-                                       "no vas a aparecer para que te reserven."]
+    assert resp.json()["warnings"] == ["No tenés ningún servicio marcado: no vas a aparecer para que te reserven."]
     assert rows(api)[(2, 1)] == (False, 45)
 
 

@@ -187,3 +187,23 @@ button:active {
     background: none; border: none; color: #10b981; cursor: pointer;
     text-decoration: underline; font-size: .9rem;
 }
+/* ===== Reserva con el catálogo (3e) ===== */
+.label-row {
+    display: flex; justify-content: space-between; align-items: baseline; gap: 10px; margin-bottom: 6px;
+}
+.label-row label { margin-bottom: 0; }
+.service-price { white-space: nowrap; font-size: .95rem; }
+.service-price strong { color: var(--primary); font-weight: 700; }
+.service-price s { color: var(--text-muted); font-size: .85rem; margin-right: 6px; }
+/* Servicio y descuento lado a lado, mitad y mitad; los nombres largos se cortan con "…" */
+.select-pair { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 8px; }
+.select-pair select { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.select-pair select:disabled { color: var(--text-muted); cursor: not-allowed; }
+.form-error {
+    margin: 0 0 5px; padding: 10px 12px; border-radius: 8px;
+    background: rgba(239, 68, 68, .12); border: 1px solid rgba(239, 68, 68, .5);
+    color: #fca5a5; font-size: .9rem; overflow-wrap: anywhere;
+}
+.wa-detail { overflow-wrap: anywhere; }
+.wa-detail.confirm-what { margin-bottom: 4px; }
+select option { overflow-wrap: anywhere; }

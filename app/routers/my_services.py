@@ -5,7 +5,7 @@ y cuánto tarda en cada uno. No toca precios.
 - SIEMPRE sobre el usuario logueado (current_user.id): no hay employee_id en ninguna entrada.
 - Solo servicios ACTIVOS del negocio. Las filas de servicios desactivados no se tocan.
 - Dejar de hacer un servicio = barber_services.active false (se recuerda la duración).
-- En 3c la reserva todavía no usa esto (sigue con users.duration_* hasta 3e).
+- La reserva pública (3e) usa estas filas: quién hace cada servicio y cuánto tarda.
 """
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.exc import IntegrityError
@@ -132,6 +132,5 @@ def put_my_services(payload: MyServicesUpdate, request: Request,
             warnings.append(f"Dejaste de hacer “{s.name}”, pero tenés {n} turno{plural} futuro{plural} "
                             "con ese servicio: siguen reservados.")
     if active and not any(s.does for s in services):
-        warnings.append("No tenés ningún servicio marcado: cuando se active la reserva nueva, "
-                        "no vas a aparecer para que te reserven.")
+        warnings.append("No tenés ningún servicio marcado: no vas a aparecer para que te reserven.")
     return MyServicesSaveOut(services=services, changed=bool(changed_ids), warnings=warnings)

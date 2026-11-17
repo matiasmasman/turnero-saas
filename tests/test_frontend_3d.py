@@ -71,3 +71,11 @@ def test_versiones_de_cache_subidas():
     assert 'src="js/panel.js?v=12"' in HTML
     assert 'src="js/owner-catalog.js?v=1"' in HTML
     assert HTML.index('js/panel.js?v=12') < HTML.index('js/owner-catalog.js?v=1')
+
+
+def test_sin_textos_provisorios_de_por_ahora():
+    # 3e: la web pública ya usa el catálogo; los avisos "Por ahora…" del 3d se van
+    cards = owner_cards_html()
+    for old in ("Por ahora", "por ahora", "precios de antes", "reserva nueva", "siguen como antes"):
+        assert old not in cards, old
+    assert "En la web de reservas aparecen los" in cards and "lo elige en el desplegable «Descuento»." in cards

@@ -17,6 +17,7 @@ from sqlalchemy import create_engine, inspect, text
 
 from app.core import schema as schema_guard
 from scripts import migrate_e3 as mig
+from scripts import migrate_e3e as mig_e3e
 
 ROOT = mig.ROOT
 CLIENT_NAMES = ["Cliente Uno", "Cliente Dos", "Cliente Tres"]
@@ -444,13 +445,15 @@ def test_base_nueva_init_y_despues_migracion(tmp_path, staff_on, capsys):
     manage_staff = staff_on(engine)
     manage_staff.cmd_init("clave-de-prueba")
     assert "Falta la migración" in capsys.readouterr().out
-    assert schema_guard.missing_migrations(engine) == ["e3a_catalogo"]
+    assert schema_guard.missing_migrations(engine) == ["e3a_catalogo", "e3e_service_ids"]
 
     result = mig.migrate(engine, out=quiet)
     assert result["status"] == "applied"
     assert result["tables_created"] == []               # ya las había creado init (create_all)
     assert result["appointment_columns_added"] == []    # idem
     assert scalar(engine, "SELECT COUNT(*) FROM barber_services") == 4 * 3
+    assert schema_guard.missing_migrations(engine) == ["e3e_service_ids"]   # la del 3e va después
+    assert mig_e3e.migrate(engine, out=quiet)["status"] == "applied"
     assert schema_guard.missing_migrations(engine) == []
     engine.dispose()
 
@@ -480,6 +483,9 @@ def test_proteccion_base_vacia_no_arranca(tmp_path):
 
 def test_proteccion_con_migracion_arranca(sqlite_db):
     mig.migrate(sqlite_db, out=quiet)
+    with pytest.raises(RuntimeError, match="no tiene aplicada la migración e3e_service_ids"):
+        schema_guard.ensure_schema_ready(sqlite_db)  # falta la del 3e
+    mig_e3e.migrate(sqlite_db, out=quiet)
     schema_guard.ensure_schema_ready(sqlite_db)      # no levanta error
 
 
@@ -504,5 +510,6 @@ def test_app_no_arranca_sin_migracion(sqlite_db, monkeypatch):
 
 def test_app_arranca_con_migracion(sqlite_db, monkeypatch):
     mig.migrate(sqlite_db, out=quiet)
+    mig_e3e.migrate(sqlite_db, out=quiet)
     main = _import_app_main(monkeypatch, sqlite_db)
     assert main.app.title.startswith("Turnero SaaS")

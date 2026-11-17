@@ -54,7 +54,16 @@ def test_no_queda_la_pantalla_vieja_de_duraciones():
 
 
 def test_versiones_de_cache_subidas():
-    # panel.css y panel.js subieron a v=12 en el 3d (ver test_frontend_3d.py)
-    assert 'src="js/my-services.js?v=1"' in HTML
+    # panel.css y panel.js subieron a v=12 en el 3d (ver test_frontend_3d.py); my-services.js a v=2 en el 3e
+    assert 'src="js/my-services.js?v=2"' in HTML
     # my-services.js va después de panel.js (usa API_URL, logout y showX de panel.js)
-    assert HTML.index('js/panel.js?v=') < HTML.index('js/my-services.js?v=1')
+    assert HTML.index('js/panel.js?v=') < HTML.index('js/my-services.js?v=2')
+
+
+def test_sin_textos_provisorios_de_la_reserva_vieja():
+    # 3e: la reserva ya usa "Mis servicios" (decisión G del 3c: el aviso provisorio se va)
+    card = card_html()
+    for old in ("Por ahora", "tiempos de antes", "reserva nueva"):
+        assert old not in card, old
+        assert old not in JS, old
+    assert "La web de reservas arma tus horarios con estos tiempos." in card

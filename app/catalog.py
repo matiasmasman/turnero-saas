@@ -2,8 +2,10 @@
 Catálogo (Entrega 3): reglas de servicios y descuentos y el cálculo de precio del servidor.
 
 - current_business_id(): el ÚNICO lugar que decide a qué negocio pertenece el usuario.
+- public_business_id(): el negocio de la web pública de reservas (sin usuario logueado).
+- now_local(): el "ahora" en hora del negocio (la usan la reserva y los conteos de turnos futuros).
 - normalize_name(): la regla de nombres (servicios y descuentos).
-- quote_price(): el precio final de (servicio, descuento opcional). La reserva (3e) lo va a usar;
+- quote_price(): el precio final de (servicio, descuento opcional). Lo usa la reserva (3e):
   el precio nunca lo decide el navegador.
 """
 import os
@@ -33,8 +35,15 @@ def current_business_id(user: User) -> int:
     return 1
 
 
+def public_business_id() -> int:
+    """Negocio de la web pública de reservas. Hoy hay uno solo (id 1). Con varios negocios, saldrá
+    del dominio o de la dirección de la página; nada más cambia."""
+    return 1
+
+
 def now_local() -> datetime:
-    """Hora local del negocio, sin zona (como se guardan date/time de los turnos)."""
+    """Hora local del negocio, sin zona (como se guardan date/time de los turnos). La zona es WA_TIMEZONE,
+    la misma que usa app/whatsapp.py. Es la ÚNICA fuente de "ahora" para reservar."""
     return datetime.now(LOCAL_TZ).replace(tzinfo=None)
 
 

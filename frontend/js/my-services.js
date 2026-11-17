@@ -131,7 +131,7 @@
             }));
 
         if (rows.length && !services.length && !confirm(
-            'No marcaste ningún servicio. Cuando se active la reserva nueva, no vas a aparecer para que te reserven. ¿Guardar igual?')) {
+            'No marcaste ningún servicio: no vas a aparecer para que te reserven. ¿Guardar igual?')) {
             return;
         }
 

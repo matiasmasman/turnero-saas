@@ -15,6 +15,18 @@ from fastapi.staticfiles import StaticFiles
 ensure_schema_ready(engine)
 
 
+class FrontendFiles(StaticFiles):
+    """Las páginas .html se revalidan siempre (Cache-Control: no-cache; con el ETag, si no cambiaron la
+    respuesta es un 304 vacío). Así, cuando un ?v= cambia en el .html, el navegador pide el JS/CSS nuevo
+    enseguida. Los JS/CSS se siguen guardando como siempre: cambian de URL con el ?v=."""
+
+    async def get_response(self, path, scope):
+        response = await super().get_response(path, scope)
+        if response.headers.get("content-type", "").startswith("text/html"):
+            response.headers["Cache-Control"] = "no-cache"
+        return response
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     dispatcher.start()   # hilo que manda confirmaciones y recordatorios (si WHATSAPP_ENABLED=true)
@@ -60,4 +72,4 @@ def trigger_alert(request: Request):
     return {"message": "Alerta registrada en los logs"}
 
 
-app.mount("/", StaticFiles(directory="frontend", html=True), name="frontend")
+app.mount("/", FrontendFiles(directory="frontend", html=True), name="frontend")

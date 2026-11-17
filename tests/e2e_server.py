@@ -7,7 +7,7 @@ como un proceso aparte.
 Todo queda en la carpeta temporal y nada toca lo real:
 - No lee el .env (app/database.py y app/core/security.py hacen load_dotenv(override=True), que pisaría
   estas variables): se anula load_dotenv, igual que en conftest.py.
-- Base SQLite nueva en <carpeta>/e2e.db: `manage_staff init` + la migración e3a (scripts.migrate_e3).
+- Base SQLite nueva en <carpeta>/e2e.db: `manage_staff init` + las migraciones e3a y e3e.
 - Log de seguridad en <carpeta>/security.log (SECURITY_LOG_FILE), no en logs/security.log.
 - WhatsApp apagado y SECRET_KEY de prueba.
 - Escucha SOLO en 127.0.0.1, en un puerto libre que elige el sistema. Cuando está listo, escribe el
@@ -62,9 +62,11 @@ def main() -> None:
     import manage_staff
     manage_staff.cmd_init(password)
     from scripts.migrate_e3 import make_engine, migrate
+    from scripts.migrate_e3e import migrate as migrate_e3e
     engine = make_engine(db_url)
     try:
         migrate(engine)
+        migrate_e3e(engine)
     finally:
         engine.dispose()
 

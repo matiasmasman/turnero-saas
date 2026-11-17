@@ -1,10 +1,23 @@
-from pydantic import BaseModel, ConfigDict, validator, Field, model_validator, field_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator, field_validator
 from app.models import UserRole
 from typing import Annotated, Literal, Optional, List
 from datetime import time, date as dt_date
 import re
 
-VALID_SERVICES = Literal["Corte", "Barba", "Corte + Barba"]
+# Ids de la base: enteros estrictos ("3" como texto, 3.0 o true no valen)
+EntityId = Annotated[int, Field(strict=True, ge=1, le=2_147_483_647)]
+DATE_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
+
+
+def parse_iso_date(value: str) -> dt_date:
+    """Fecha real con formato AAAA-MM-DD (ej. 2026-11-20). "2026-02-30" o "20261120" no valen."""
+    if not isinstance(value, str) or not DATE_RE.fullmatch(value):
+        raise ValueError("La fecha no es válida: tiene que ser AAAA-MM-DD.")
+    try:
+        return dt_date.fromisoformat(value)
+    except ValueError:
+        raise ValueError("La fecha no es válida: ese día no existe.") from None
+
 
 class UserResponse(BaseModel):
     id: int
@@ -29,12 +42,25 @@ class Token(BaseModel):
     token_type: str
 
 class AppointmentCreate(BaseModel):
+    """Reserva de la web pública (3e). El navegador dice QUÉ quiere (service_id y, si quiere, discount_id);
+    el precio y la duración los pone el servidor. extra="forbid": mandar price, duration, service... da 422."""
+    model_config = ConfigDict(extra="forbid")
+
     client_name: str
     client_phone: str
-    service: VALID_SERVICES
+    service_id: EntityId
+    discount_id: Optional[EntityId] = None
     date: str
     time: str
-    employee_id: Optional[int] = None
+    employee_id: Optional[EntityId] = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _old_page(cls, data):
+        # Un navegador con el index.js de antes de 3e manda "service" por nombre: que recargue la página
+        if isinstance(data, dict) and "service" in data and "service_id" not in data:
+            raise ValueError("La página de reservas se actualizó. Recargala para reservar tu turno.")
+        return data
 
     @field_validator("client_name")
     @classmethod
@@ -54,15 +80,24 @@ class AppointmentCreate(BaseModel):
             raise ValueError("El teléfono tiene que tener 10 números, con característica y sin 0 ni 15 (ej: 2611234567).")
         return digits
 
-    @validator("time")
-    def validate_time_format(cls, value):
+    @field_validator("date")
+    @classmethod
+    def validate_date(cls, value: str) -> str:
+        return parse_iso_date(value).isoformat()
+
+    @field_validator("time")
+    @classmethod
+    def validate_time_format(cls, value: str) -> str:
         if not value or value.strip() == "":
             raise ValueError("El horario no puede estar vacío.")
-        if not re.match(r"^(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d)?$", value):
-             raise ValueError("El formato de hora es inválido. Debe ser HH:MM.")
-        return value
+        if not re.fullmatch(r"(?:[01]\d|2[0-3]):[0-5]\d(?::00)?", value):
+            raise ValueError("El formato de hora es inválido. Debe ser HH:MM.")
+        if int(value[3:5]) % 5:                    # decisión E3 del 3e: 10:05 sí, 10:07 no
+            raise ValueError("El horario tiene que ser en punto o cada 5 minutos (por ejemplo, 10:05).")
+        return value[:5]
 
 class AppointmentResponse(BaseModel):
+    """Turno para el panel (agenda). La web pública usa PublicAppointmentOut (menos datos)."""
     id: int
     client_name: str
     client_phone: str
@@ -78,6 +113,43 @@ class AppointmentResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+# ---------- Web pública de reservas (3e): solo lo que la página necesita ----------
+class PublicDiscountOut(BaseModel):
+    id: int
+    name: str
+    price: int                    # precio final con este descuento
+
+
+class PublicServiceOut(BaseModel):
+    id: int
+    name: str
+    price: int                    # precio de lista
+    barber_ids: List[int]         # quiénes lo hacen (para armar la lista de barberos)
+    discounts: List[PublicDiscountOut]
+
+
+class PublicBarberOut(BaseModel):
+    id: int
+    name: str
+
+
+class PublicCatalogOut(BaseModel):
+    services: List[PublicServiceOut]
+    barbers: List[PublicBarberOut]
+    days_ahead: int               # hasta cuántos días adelante se puede reservar
+
+
+class PublicAppointmentOut(BaseModel):
+    """Respuesta de POST /appointments/: lo que muestra la confirmación. Sin datos del cliente ni ids internos."""
+    employee_name: str
+    service: str
+    discount_name: Optional[str] = None
+    date: str
+    time: str                     # HH:MM
+    price: int                    # precio final
+    wa_link: Optional[str] = None
 
 class AppointmentPriceTierUpdate(BaseModel):
     tier: Literal["normal", "promo2x", "vip"]
@@ -236,7 +308,6 @@ from app.catalog import (DURATION_MAX, DURATION_MIN, DURATION_STEP,  # noqa: E40
 
 Price = Annotated[int, Field(strict=True, ge=PRICE_MIN, le=PRICE_MAX)]
 Duration = Annotated[int, Field(strict=True, ge=DURATION_MIN, le=DURATION_MAX, multiple_of=DURATION_STEP)]
-EntityId = Annotated[int, Field(strict=True, ge=1, le=2_147_483_647)]
 
 
 class _CatalogInput(BaseModel):
