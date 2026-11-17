@@ -310,3 +310,22 @@ def test_el_endpoint_viejo_de_duraciones_sigue_y_no_toca_barber_services(api, st
                            json={"duration_corte": 40, "duration_barba": 20})
     assert resp.status_code == 200 and resp.json()["duration_corte_barba"] == 60
     assert rows(api) == before
+
+
+# ---------- Dos "Guardar" casi a la vez (pendiente #33, arreglado en 3e) ----------
+def test_si_otro_guardar_ya_inserto_la_fila_da_409_y_no_500(api, staff, events, monkeypatch):
+    """Simula la carrera: este pedido leyó "no tengo fila para Corte" justo antes de que el otro la insertara.
+    Su INSERT choca con la clave (barbero, servicio) en el flush: tiene que ser 409, no 500."""
+    import app.routers.my_services as my_services
+    original, calls = my_services._my_rows, []
+
+    def stale_first_read(db, business_id, employee_id):
+        calls.append(employee_id)
+        return {} if len(calls) == 1 else original(db, business_id, employee_id)
+    monkeypatch.setattr(my_services, "_my_rows", stale_first_read)
+
+    resp = put(api, staff["emp_a"], [{"service_id": 1, "duration": 40}])   # Empleado A ya tiene (Corte, 45)
+    assert resp.status_code == 409
+    assert resp.json()["detail"] == "Se guardó otro cambio al mismo tiempo. Probá de nuevo."
+    assert rows(api)[(2, 1)] == (True, 45)          # quedó lo del "otro"
+    assert my_events(events) == []

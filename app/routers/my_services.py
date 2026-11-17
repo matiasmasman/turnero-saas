@@ -19,6 +19,7 @@ from app.models import BarberService, Service, User
 from app.schemas import MyServiceOut, MyServicesOut, MyServicesSaveOut, MyServicesUpdate
 
 router = APIRouter(prefix="/admin", tags=["Mis servicios (cada barbero)"])
+SAVED_AT_THE_SAME_TIME = "Se guardó otro cambio al mismo tiempo. Probá de nuevo."
 
 
 def _active_services(db: Session, business_id: int):
@@ -95,7 +96,11 @@ def put_my_services(payload: MyServicesUpdate, request: Request,
                     r.duration = wanted[sid]
         elif r is not None and r.active:
             r.active = False                       # la duración queda guardada
-    db.flush()
+    try:
+        db.flush()                                 # acá sale el INSERT: si el otro "Guardar" ya insertó, choca
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status.HTTP_409_CONFLICT, SAVED_AT_THE_SAME_TIME)
     after = _state(_my_rows(db, business_id, current_user.id), active)
 
     changed_ids = [sid for sid in active if before[sid] != after[sid]]
@@ -105,7 +110,7 @@ def put_my_services(payload: MyServicesUpdate, request: Request,
             db.commit()
         except IntegrityError:                     # dos "Guardar" al mismo tiempo
             db.rollback()
-            raise HTTPException(status.HTTP_409_CONFLICT, "Se guardó otro cambio al mismo tiempo. Probá de nuevo.")
+            raise HTTPException(status.HTTP_409_CONFLICT, SAVED_AT_THE_SAME_TIME)
         snap = lambda st, sid: {"service_id": sid, "does": st[sid][0], "duration": st[sid][1]}  # noqa: E731
         sec_logger.info(f"Servicios del barbero {current_user.id} actualizados por {current_user.username}", extra={
             "event_type": "BARBER_SERVICES_UPDATED",

@@ -88,7 +88,7 @@ def has_appointment_overlap(
         appt_dur = getattr(appt, "duration", 30) or 30
         appt_end = appt_start + appt_dur
 
-        if slot_start < exc_end if False else (slot_start < appt_end and slot_end > appt_start):
+        if slot_start < appt_end and slot_end > appt_start:
             return True
 
     return False

@@ -5,7 +5,8 @@ Preparación de las pruebas: todo aislado.
   así que lo anulamos ANTES de importar la app y usamos variables de entorno de prueba.
 - No se toca logs/security.log: app/core/telemetry.py abre ese archivo al importarse,
   así que lo reemplazamos por un logger que guarda los eventos en memoria.
-- No se toca turnero_dev.db: cada prueba usa su propia base SQLite en memoria.
+- No se toca turnero_dev.db: cada prueba usa su propia base SQLite en memoria (y, si existe la variable
+  E3_TEST_PG_URL, las pruebas de API corren además en un schema propio de ese PostgreSQL de prueba).
 - No se abren sockets: el cartero es una función de prueba y socket.socket queda bloqueado.
 """
 import logging
@@ -13,6 +14,7 @@ import os
 import socket
 import sys
 import types
+import uuid
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -49,7 +51,7 @@ _telemetry.sec_logger.propagate = False
 sys.modules["app.core.telemetry"] = _telemetry
 app.core.telemetry = _telemetry
 
-from sqlalchemy import create_engine  # noqa: E402
+from sqlalchemy import create_engine, text  # noqa: E402
 from sqlalchemy.orm import sessionmaker  # noqa: E402
 from sqlalchemy.pool import StaticPool  # noqa: E402
 
@@ -165,25 +167,54 @@ def dispatcher():
     return wa.Dispatcher()
 
 
-# ---------- API (TestClient) — Entrega 3b ----------
-@pytest.fixture
-def api(monkeypatch):
-    """La app de FastAPI lista para TestClient, sobre una base SQLite en memoria ya "migrada".
+# ---------- API (TestClient) — Entrega 3b; variante PostgreSQL en 3e ----------
+PG_URL = os.getenv("E3_TEST_PG_URL")   # ej. postgresql+psycopg2://usuario@/postgres?host=/ruta/socket&port=5499
 
-    - app.main tiene la protección de arranque (exige la migración e3a): la base de prueba se arma
-      con create_all + el negocio 1 + la fila de schema_migrations, y se le pasa a app.main
+
+def _sqlite_engine():
+    engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+    return engine, engine.dispose
+
+
+def _postgres_engine():
+    """Un schema nuevo (t_xxxxxxxxxx) en el PostgreSQL de prueba; se borra al terminar la prueba.
+    lock_timeout: si una prueba dejara una transacción abierta, el DROP falla en vez de colgarse."""
+    name = f"t_{uuid.uuid4().hex[:10]}"
+    admin = create_engine(PG_URL)
+    with admin.begin() as conn:
+        conn.execute(text(f"CREATE SCHEMA {name}"))
+    sep = "&" if "?" in PG_URL else "?"
+    engine = create_engine(f"{PG_URL}{sep}options=-csearch_path%3D{name}")
+
+    def cleanup():
+        engine.dispose()
+        with admin.begin() as conn:
+            conn.execute(text("SET LOCAL lock_timeout = '10s'"))
+            conn.execute(text(f"DROP SCHEMA {name} CASCADE"))
+        admin.dispose()
+    return engine, cleanup
+
+
+@pytest.fixture(params=["sqlite", "postgres"] if PG_URL else ["sqlite"])
+def api(request, monkeypatch):
+    """La app de FastAPI lista para TestClient, sobre una base ya "migrada": SQLite en memoria y, si existe
+    E3_TEST_PG_URL, también PostgreSQL (cada prueba de API corre una vez en cada base).
+
+    - app.main tiene la protección de arranque (exige las migraciones): la base de prueba se arma
+      con create_all + el negocio 1 + las filas de schema_migrations, y se le pasa a app.main
       reemplazando app.database.engine ANTES de importarlo (app.main se importa de cero).
     - SECRET_KEY de prueba: app.core.security la exige al importarse.
     - WhatsApp apagado: el TestClient se usa SIN "with", así no corre el lifespan (que arranca el
       dispatcher); además dispatcher.start queda anulado por las dudas.
     - get_db se reemplaza por sesiones de esta base (lo usan los endpoints y get_current_user).
+    - api.dialect dice en qué base corre ("sqlite" o "postgresql").
     """
     import importlib
     from fastapi.testclient import TestClient
     import app.database
     from app.core.schema import REQUIRED_MIGRATIONS
 
-    engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+    engine, cleanup = _postgres_engine() if request.param == "postgres" else _sqlite_engine()
     models.Base.metadata.create_all(engine)
     with engine.begin() as conn:
         conn.execute(models.Business.__table__.insert().values(id=1, slug="mensclub", name="Men's Club"))
@@ -217,8 +248,8 @@ def api(monkeypatch):
     main.app.dependency_overrides[app.database.get_db] = _db
     client = TestClient(main.app)                # sin "with": no corre el lifespan
     try:
-        yield types.SimpleNamespace(client=client, Session=factory, engine=engine)
+        yield types.SimpleNamespace(client=client, Session=factory, engine=engine, dialect=engine.dialect.name)
     finally:
         main.app.dependency_overrides.clear()
         sys.modules.pop("app.main", None)
-        engine.dispose()
+        cleanup()
