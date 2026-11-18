@@ -54,7 +54,7 @@ def test_no_queda_la_pantalla_vieja_de_duraciones():
 
 
 def test_versiones_de_cache_subidas():
-    # panel.css y panel.js subieron a v=12 en el 3d (ver test_frontend_3d.py); my-services.js a v=2 en el 3e
+    # panel.css y panel.js: v=12 en el 3d, v=13 en el 3f (ver test_agenda_3f.py); my-services.js a v=2 en el 3e
     assert 'src="js/my-services.js?v=2"' in HTML
     # my-services.js va después de panel.js (usa API_URL, logout y showX de panel.js)
     assert HTML.index('js/panel.js?v=') < HTML.index('js/my-services.js?v=2')

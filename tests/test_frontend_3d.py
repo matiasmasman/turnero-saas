@@ -55,8 +55,8 @@ def test_no_queda_la_tarjeta_vieja_de_precios():
     for old in ("ownerPricesCard", "pricesForm", "priceCortePromo2x", "priceCorteVip", "Guardar Precios"):
         assert old not in HTML, old
         assert old not in PANEL_JS, old
-    # La agenda sigue usando los precios viejos hasta el 3f
-    assert "/admin/service-prices" in PANEL_JS and "shopPrices" in PANEL_JS
+    # Desde el 3f la agenda tampoco usa los precios viejos (ver test_agenda_3f.py)
+    assert "/admin/service-prices" not in PANEL_JS and "shopPrices" not in PANEL_JS
     assert "if (isOwner) loads.push(loadOwnerCatalog());" in PANEL_JS
 
 
@@ -67,10 +67,10 @@ def test_escapehtml_escapa_la_comilla_simple():
 
 
 def test_versiones_de_cache_subidas():
-    assert 'href="css/panel.css?v=12"' in HTML
-    assert 'src="js/panel.js?v=12"' in HTML
+    # panel.css y panel.js subieron a v=13 en el 3f (ver test_agenda_3f.py)
+    assert 'href="css/panel.css?v=' in HTML and 'src="js/panel.js?v=' in HTML
     assert 'src="js/owner-catalog.js?v=1"' in HTML
-    assert HTML.index('js/panel.js?v=12') < HTML.index('js/owner-catalog.js?v=1')
+    assert HTML.index('js/panel.js?v=') < HTML.index('js/owner-catalog.js?v=1')
 
 
 def test_sin_textos_provisorios_de_por_ahora():

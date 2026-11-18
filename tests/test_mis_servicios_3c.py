@@ -303,12 +303,8 @@ def test_no_toca_las_duraciones_viejas_que_usa_la_reserva(api, staff):
     db.close()
 
 
-def test_el_endpoint_viejo_de_duraciones_sigue_y_no_toca_barber_services(api, staff):
-    before = rows(api)
-    resp = api.client.post("/admin/service-durations", headers=staff["emp_a"],
-                           json={"duration_corte": 40, "duration_barba": 20})
-    assert resp.status_code == 200 and resp.json()["duration_corte_barba"] == 60
-    assert rows(api) == before
+# test_el_endpoint_viejo_de_duraciones_sigue_... se fue en el 3f: /admin/service-durations ya no existe
+# (ver test_agenda_3f.py).
 
 
 # ---------- Dos "Guardar" casi a la vez (pendiente #33, arreglado en 3e) ----------

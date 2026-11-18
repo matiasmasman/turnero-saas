@@ -1,6 +1,7 @@
 from pydantic import BaseModel, ConfigDict, Field, model_validator, field_validator
+from app import catalog
 from app.models import UserRole
-from typing import Annotated, Literal, Optional, List
+from typing import Annotated, Optional, List
 from datetime import time, date as dt_date
 import re
 
@@ -105,7 +106,8 @@ class AppointmentResponse(BaseModel):
     date: str
     time: str
     duration: int = 30
-    price: int = 15000
+    price: int = 15000                    # precio final congelado al reservar (con el descuento, si tuvo)
+    discount_name: Optional[str] = None   # nombre del descuento al reservar; None en los turnos sin descuento
     status: str
     employee_id: int
     employee_name: Optional[str] = None
@@ -151,9 +153,6 @@ class PublicAppointmentOut(BaseModel):
     price: int                    # precio final
     wa_link: Optional[str] = None
 
-class AppointmentPriceTierUpdate(BaseModel):
-    tier: Literal["normal", "promo2x", "vip"]
-
 # ==========================================
 # ESQUEMAS DE MÉTRICAS Y FACTURACIÓN
 # ==========================================
@@ -198,52 +197,6 @@ class WorkingHoursResponse(WorkingHoursBase):
         from_attributes = True
 
 # ==========================================
-# ESQUEMAS DE DURACIÓN Y PRECIOS DE SERVICIOS
-# ==========================================
-
-class ServiceDurationsUpdate(BaseModel):
-    duration_corte: int = Field(..., ge=30, le=45, description="Corte: 30 a 45 min")
-    duration_barba: int = Field(..., ge=10, le=20, description="Barba: 10 a 20 min")
-    duration_corte_barba: Optional[int] = None
-
-    @field_validator("duration_corte", "duration_barba")
-    @classmethod
-    def validate_step_of_five(cls, v: int) -> int:
-        if v % 5 != 0:
-            raise ValueError("La duración debe ser en intervalos de 5 minutos.")
-        return v
-
-    @model_validator(mode="after")
-    def compute_combined_duration(self):
-        self.duration_corte_barba = self.duration_corte + self.duration_barba
-        return self
-
-class ServiceDurationsResponse(BaseModel):
-    duration_corte: int
-    duration_barba: int
-    duration_corte_barba: int
-
-    class Config:
-        from_attributes = True
-
-class ServicePricesUpdate(BaseModel):
-    price_corte: int = Field(..., ge=0, le=1000000)
-    price_corte_promo2x: int = Field(12000, ge=0, le=1000000)
-    price_corte_vip: int = Field(10000, ge=0, le=1000000)
-    price_barba: int = Field(..., ge=0, le=1000000)
-    price_corte_barba: int = Field(..., ge=0, le=1000000)
-
-class ServicePricesResponse(BaseModel):
-    price_corte: int
-    price_corte_promo2x: int
-    price_corte_vip: int
-    price_barba: int
-    price_corte_barba: int
-
-    class Config:
-        from_attributes = True
-
-# ==========================================
 # ESQUEMAS DE FERIADOS Y EXCEPCIONES
 # ==========================================
 
@@ -266,7 +219,7 @@ class ExceptionCreate(BaseModel):
         if not re.match(r"^\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\d|3[01])$", self.date):
             raise ValueError("El formato de fecha es inválido. Debe ser YYYY-MM-DD.")
         
-        if self.date < dt_date.today().isoformat():
+        if self.date < catalog.now_local().date().isoformat():   # hoy en hora del negocio (3f)
             raise ValueError("No se pueden programar excepciones en fechas pasadas.")
 
         if (self.start_time and not self.end_time) or (not self.start_time and self.end_time):

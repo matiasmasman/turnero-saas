@@ -1134,7 +1134,8 @@ select:focus {
     }
 }
 
-/* Badge de precio congelado y menú desplegable de tarifa (Normal / Promo 2x / VIP) */
+/* Agenda: precio final del turno y, si tuvo, el descuento ("$9.000 · VIP"). Solo lectura desde el 3f.
+   Un nombre de descuento largo (hasta 40) corta en renglones en vez de empujar la fila (celular 360 px). */
 .price-tag {
     display: inline-flex;
     align-items: center;
@@ -1146,76 +1147,8 @@ select:focus {
     background: rgba(16, 185, 129, 0.14);
     color: #34d399;
     border: 1px solid rgba(16, 185, 129, 0.28);
-}
-
-.price-tag.clickable {
-    cursor: pointer;
-    font-family: inherit;
-    transition: all 0.15s ease;
-}
-
-.price-tag.clickable:hover {
-    filter: brightness(1.18);
-    transform: translateY(-1px);
-}
-
-.price-tag.price-tag-promo {
-    background: rgba(99, 102, 241, 0.18);
-    color: #818cf8;
-    border-color: rgba(99, 102, 241, 0.45);
-}
-
-.price-tag.price-tag-vip {
-    background: rgba(245, 158, 11, 0.18);
-    color: #fbbf24;
-    border-color: rgba(245, 158, 11, 0.45);
-}
-
-.price-caret {
-    font-size: 0.7rem;
-    opacity: 0.8;
-}
-
-.tariff-pills {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
-    margin-top: 8px;
-}
-
-.tariff-btn {
-    background: rgba(30, 41, 59, 0.7);
-    color: #94a3b8;
-    border: 1px solid rgba(148, 163, 184, 0.2);
-    border-radius: 6px;
-    padding: 4px 9px;
-    font-size: 0.74rem;
-    font-weight: 600;
-    cursor: pointer;
-    transition: all 0.15s ease;
-}
-
-.tariff-btn:hover {
-    color: #f8fafc;
-    border-color: rgba(148, 163, 184, 0.4);
-}
-
-.tariff-btn.active {
-    background: rgba(16, 185, 129, 0.16);
-    color: #34d399;
-    border-color: rgba(16, 185, 129, 0.45);
-}
-
-.tariff-btn.active-promo {
-    background: rgba(99, 102, 241, 0.18);
-    color: #818cf8;
-    border-color: rgba(99, 102, 241, 0.45);
-}
-
-.tariff-btn.active-vip {
-    background: rgba(245, 158, 11, 0.18);
-    color: #fbbf24;
-    border-color: rgba(245, 158, 11, 0.45);
+    max-width: 100%;
+    overflow-wrap: anywhere;
 }
 
 /* ==========================================

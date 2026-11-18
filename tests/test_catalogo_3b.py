@@ -130,11 +130,8 @@ def test_owner_puede_usar_cada_endpoint(api, cat, method, path, body):
     assert resp.status_code in (200, 201), resp.text
 
 
-def test_endpoints_viejos_siguen_igual(api, cat):
-    assert api.client.get("/admin/service-prices", headers=cat["owner"]).json()["price_corte"] == 15000
-    assert api.client.post("/admin/service-prices", headers=cat["employee"], json={
-        "price_corte": 1, "price_barba": 1, "price_corte_barba": 1}).status_code == 403
-    # GET /appointments/services (precios viejos de la web pública) se fue en el 3e: ver test_reserva_3e.py
+# test_endpoints_viejos_siguen_igual se fue en el 3f: /admin/service-prices ya no existe (ver test_agenda_3f.py).
+# GET /appointments/services (precios viejos de la web pública) se fue en el 3e: ver test_reserva_3e.py
 
 
 def test_con_api_sigue_prohibido_abrir_sockets_nuevos(api):

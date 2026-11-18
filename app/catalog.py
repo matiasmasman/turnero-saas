@@ -3,7 +3,8 @@ Catálogo (Entrega 3): reglas de servicios y descuentos y el cálculo de precio 
 
 - current_business_id(): el ÚNICO lugar que decide a qué negocio pertenece el usuario.
 - public_business_id(): el negocio de la web pública de reservas (sin usuario logueado).
-- now_local(): el "ahora" en hora del negocio (la usan la reserva y los conteos de turnos futuros).
+- now_local(): el "ahora" en hora del negocio (la usan la reserva, los conteos de turnos futuros y,
+  desde el 3f, las métricas y las excepciones del panel).
 - normalize_name(): la regla de nombres (servicios y descuentos).
 - quote_price(): el precio final de (servicio, descuento opcional). Lo usa la reserva (3e):
   el precio nunca lo decide el navegador.

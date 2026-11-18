@@ -9,14 +9,6 @@ let workingDaysConfig = {
     team_working_days: [0, 1, 2, 3, 4, 5]
 };
 
-let shopPrices = {
-    price_corte: 15000,
-    price_corte_promo2x: 12000,
-    price_corte_vip: 10000,
-    price_barba: 10000,
-    price_corte_barba: 18000
-};
-
 let currentMetricsPeriod = 'month';
 let currentMetricsEmployeeId = '';
 let metricsBarbersLoaded = false;
@@ -73,10 +65,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 async function initSession(token) {
     const ok = await loadCurrentUser(token);
     if (!ok) return logout();
-    await Promise.all([
-        loadWorkingDaysConfig(token),
-        loadServicePrices(token)
-    ]);
+    await loadWorkingDaysConfig(token);
     showDashboard();
     await fetchAppointments(token);
 }
@@ -346,47 +335,11 @@ function renderAgenda(appointments) {
                 const safePhone = String(app.client_phone || '').replace(/\D/g, '');
                 const safeId = Number(app.id);
 
-                const currentPrice = app.price ?? shopPrices.price_corte;
-                const isCorte = app.service === 'Corte';
-                const isPromo2x = isCorte && currentPrice === shopPrices.price_corte_promo2x;
-                const isVip = isCorte && currentPrice === shopPrices.price_corte_vip;
-                const isNormal = !isPromo2x && !isVip;
-
-                // Color y etiqueta del badge de precio según la tarifa activa
-                let priceTierClass = '';
-                let tierSuffix = '';
-                if (isPromo2x) {
-                    priceTierClass = 'price-tag-promo';
-                    tierSuffix = ' · 2x';
-                } else if (isVip) {
-                    priceTierClass = 'price-tag-vip';
-                    tierSuffix = ' · VIP';
-                }
-
-                // Si es "Corte", el precio es clickeable para desplegar las opciones
-                const priceBadgeHtml = (isCorte && !isCancelled)
-                    ? `<button type="button" class="price-tag clickable ${priceTierClass}" onclick="toggleTariffMenu(${app.id})" title="Cambiar tarifa">
-                           ${formatARS(currentPrice)}${tierSuffix} <span class="price-caret">▾</span>
-                       </button>`
-                    : `<span class="price-tag">${formatARS(currentPrice)}</span>`;
-
-                // Menú oculto por defecto; se abre solo al tocar el precio
-                const tariffButtonsHtml = (isCorte && !isCancelled) ? `
-                    <div id="tariff-pills-${app.id}" class="tariff-pills" style="display: none;">
-                        <button type="button" class="tariff-btn ${isNormal ? 'active' : ''}"
-                            onclick="cambiarTarifaTurno(${app.id}, 'normal')">
-                            Normal ${formatCompactARS(shopPrices.price_corte)}
-                        </button>
-                        <button type="button" class="tariff-btn ${isPromo2x ? 'active-promo' : ''}"
-                            onclick="cambiarTarifaTurno(${app.id}, 'promo2x')">
-                            Promo 2x ${formatCompactARS(shopPrices.price_corte_promo2x)}
-                        </button>
-                        <button type="button" class="tariff-btn ${isVip ? 'active-vip' : ''}"
-                            onclick="cambiarTarifaTurno(${app.id}, 'vip')">
-                            VIP ${formatCompactARS(shopPrices.price_corte_vip)}
-                        </button>
-                    </div>
-                ` : '';
+                // Precio final congelado al reservar y, si tuvo, el descuento: solo lectura (3f).
+                // Los dos vienen de la base: van por escapeHtml. Turnos viejos sin descuento: solo el precio.
+                const discountName = String(app.discount_name || '').trim();
+                const priceText = formatARS(app.price) + (discountName ? ` · ${discountName}` : '');
+                const priceBadgeHtml = `<span class="price-tag">${escapeHtml(priceText)}</span>`;
 
                 dayHtml += `
                     <div class="appointment-item ${isCancelled ? 'appt-cancelled' : ''}">
@@ -398,7 +351,6 @@ function renderAgenda(appointments) {
                                 ${isCancelled ? '<span class="cancelled-tag">Canceló por WhatsApp</span>' : priceBadgeHtml}
                                 ${barberBadge}
                             </div>
-                            ${tariffButtonsHtml}
                         </div>
                         <div class="appt-actions">
                             <button class="btn-wpp" onclick="abrirWpp('${safePhone}')">WhatsApp</button>
@@ -417,50 +369,6 @@ function renderAgenda(appointments) {
 
     if (visibleDaysCount === 0) {
         container.innerHTML = '<p style="color:#64748b; text-align:center; padding: 20px 0;">No hay días laborables configurados para mostrar.</p>';
-    }
-}
-
-function toggleTariffMenu(appointmentId) {
-    const targetMenu = document.getElementById(`tariff-pills-${appointmentId}`);
-    if (!targetMenu) return;
-
-    const isHidden = targetMenu.style.display === 'none';
-
-    // Cierra cualquier otro menú de tarifa que haya quedado abierto
-    document.querySelectorAll('.tariff-pills').forEach(el => {
-        el.style.display = 'none';
-    });
-
-    targetMenu.style.display = isHidden ? 'flex' : 'none';
-}
-
-async function cambiarTarifaTurno(appointmentId, tier) {
-    const token = localStorage.getItem('access_token');
-    if (!token) return;
-
-    try {
-        const res = await fetch(`${API_URL}/admin/appointments/${appointmentId}/price`, {
-            method: 'PATCH',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${token}`
-            },
-            body: JSON.stringify({ tier })
-        });
-
-        if (res.ok) {
-            const updatedAppt = await res.json();
-            const idx = allAppointmentsCache.findIndex(a => a.id === appointmentId);
-            if (idx !== -1) {
-                allAppointmentsCache[idx].price = updatedAppt.price;
-            }
-            renderAgenda(allAppointmentsCache);
-        } else {
-            const err = await res.json();
-            alert(err.detail || 'No se pudo actualizar la tarifa del turno.');
-        }
-    } catch (e) {
-        alert('Error de conexión al actualizar el precio.');
     }
 }
 
@@ -736,29 +644,6 @@ async function showServices() {
     const loads = [loadMyServices()];
     if (isOwner) loads.push(loadOwnerCatalog());
     await Promise.all(loads);
-}
-
-// Precios VIEJOS (users.price_*): los sigue usando la agenda (botón de tarifa) hasta el 3f.
-// Ya no hay pantalla para editarlos: el catálogo nuevo está en "Servicios del local".
-
-async function loadServicePrices(token) {
-    try {
-        const res = await fetch(`${API_URL}/admin/service-prices`, {
-            headers: { 'Authorization': `Bearer ${token}` }
-        });
-        if (res.ok) {
-            const data = await res.json();
-            shopPrices = {
-                price_corte: data.price_corte ?? 15000,
-                price_corte_promo2x: data.price_corte_promo2x ?? 12000,
-                price_corte_vip: data.price_corte_vip ?? 10000,
-                price_barba: data.price_barba ?? 10000,
-                price_corte_barba: data.price_corte_barba ?? 18000
-            };
-        }
-    } catch (err) {
-        console.error("Error al cargar precios:", err);
-    }
 }
 
 // ==========================================

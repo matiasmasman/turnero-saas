@@ -1,27 +1,23 @@
 import calendar
 from typing import List, Optional, Literal
-from datetime import date as dt_date, datetime, timedelta
+from datetime import timedelta
 from fastapi import APIRouter, HTTPException, Depends, status, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import or_
+from app import catalog
 from app.database import get_db
 from app.models import User, UserRole, Appointment, WorkingHours, ScheduleException
 from app.schemas import (
     UserResponse,
     AppointmentResponse,
-    AppointmentPriceTierUpdate,
     WorkingHoursUpdate,
     WorkingHoursResponse,
-    ServiceDurationsUpdate,
-    ServiceDurationsResponse,
-    ServicePricesUpdate,
-    ServicePricesResponse,
     ExceptionCreate,
     ExceptionResponse,
     ChartPointItem,
     MetricsResponse,
 )
-from app.dependencies import get_owner, get_staff
+from app.dependencies import get_staff
 from app.core.telemetry import sec_logger
 
 router = APIRouter(prefix="/admin", tags=["Administración (Staff y Dueño)"])
@@ -32,80 +28,6 @@ def _time_str_to_minutes(t_str: str) -> int:
 
 @router.get("/me", response_model=UserResponse)
 def get_current_staff_profile(current_user: User = Depends(get_staff)):
-    return current_user
-
-# ==========================================
-# ENDPOINTS DE SERVICIOS (DURACIONES Y PRECIOS)
-# ==========================================
-
-@router.get("/service-durations", response_model=ServiceDurationsResponse)
-def get_my_service_durations(current_user: User = Depends(get_staff)):
-    return current_user
-
-@router.post("/service-durations", response_model=ServiceDurationsResponse)
-def update_my_service_durations(
-    durations_data: ServiceDurationsUpdate,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_staff)
-):
-    current_user.duration_corte = durations_data.duration_corte
-    current_user.duration_barba = durations_data.duration_barba
-    current_user.duration_corte_barba = durations_data.duration_corte_barba
-
-    db.commit()
-    db.refresh(current_user)
-
-    sec_logger.info(
-        f"Duraciones de servicios actualizadas por {current_user.username}",
-        extra={
-            "event_type": "SERVICE_DURATIONS_UPDATED",
-            "actor_id": current_user.id,
-            "metadata": {
-                "duration_corte": current_user.duration_corte,
-                "duration_barba": current_user.duration_barba,
-                "duration_corte_barba": current_user.duration_corte_barba
-            }
-        }
-    )
-    return current_user
-
-@router.get("/service-prices", response_model=ServicePricesResponse)
-def get_service_prices(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_staff)
-):
-    owner = db.query(User).filter(User.role == UserRole.OWNER).first()
-    return owner if owner else current_user
-
-@router.post("/service-prices", response_model=ServicePricesResponse)
-def update_service_prices(
-    prices_data: ServicePricesUpdate,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_owner)
-):
-    current_user.price_corte = prices_data.price_corte
-    current_user.price_corte_promo2x = prices_data.price_corte_promo2x
-    current_user.price_corte_vip = prices_data.price_corte_vip
-    current_user.price_barba = prices_data.price_barba
-    current_user.price_corte_barba = prices_data.price_corte_barba
-
-    db.commit()
-    db.refresh(current_user)
-
-    sec_logger.info(
-        f"Precios de servicios actualizados por el dueño {current_user.username}",
-        extra={
-            "event_type": "SERVICE_PRICES_UPDATED",
-            "actor_id": current_user.id,
-            "metadata": {
-                "price_corte": current_user.price_corte,
-                "price_corte_promo2x": current_user.price_corte_promo2x,
-                "price_corte_vip": current_user.price_corte_vip,
-                "price_barba": current_user.price_barba,
-                "price_corte_barba": current_user.price_corte_barba
-            }
-        }
-    )
     return current_user
 
 @router.get("/working-days")
@@ -176,67 +98,6 @@ def get_staff_appointments(
     )
     
     return appointments
-
-@router.patch("/appointments/{appointment_id}/price", response_model=AppointmentResponse)
-def update_appointment_price_tier(
-    appointment_id: int,
-    payload: AppointmentPriceTierUpdate,
-    current_user: User = Depends(get_staff),
-    db: Session = Depends(get_db)
-):
-    appointment = db.query(Appointment).filter(Appointment.id == appointment_id).first()
-    if not appointment:
-        raise HTTPException(status_code=404, detail="Turno no encontrado.")
-
-    # Barrera Anti-IDOR: un empleado solo puede modificar el precio de sus propios turnos
-    if current_user.role == UserRole.EMPLOYEE and appointment.employee_id != current_user.id:
-        sec_logger.warning(
-            f"Intento IDOR: {current_user.username} intentó cambiar el precio del turno {appointment_id} ajeno",
-            extra={
-                "event_type": "IDOR_ATTEMPT_APPOINTMENT_PRICE",
-                "actor_id": current_user.id,
-                "metadata": {"appointment_id": appointment_id, "owner_employee_id": appointment.employee_id}
-            }
-        )
-        raise HTTPException(status_code=403, detail="No tenés permisos para modificar un turno de otro barbero.")
-
-    owner = db.query(User).filter(User.role == UserRole.OWNER).first()
-    price_source = owner if owner else current_user
-
-    old_price = appointment.price
-
-    if payload.tier == "promo2x":
-        new_price = getattr(price_source, "price_corte_promo2x", 12000)
-    elif payload.tier == "vip":
-        new_price = getattr(price_source, "price_corte_vip", 10000)
-    else:
-        if appointment.service == "Barba":
-            new_price = price_source.price_barba
-        elif appointment.service == "Corte + Barba":
-            new_price = price_source.price_corte_barba
-        else:
-            new_price = price_source.price_corte
-
-    appointment.price = new_price
-    db.commit()
-    db.refresh(appointment)
-    appointment.employee_name = appointment.employee.name if appointment.employee else "Sin asignar"
-
-    sec_logger.info(
-        f"Precio del turno {appointment_id} actualizado a {new_price} ({payload.tier}) por {current_user.username}",
-        extra={
-            "event_type": "APPOINTMENT_PRICE_UPDATED",
-            "actor_id": current_user.id,
-            "metadata": {
-                "appointment_id": appointment_id,
-                "tier": payload.tier,
-                "old_price": old_price,
-                "new_price": new_price
-            }
-        }
-    )
-
-    return appointment
 
 @router.delete("/appointments/{appointment_id}", status_code=status.HTTP_204_NO_CONTENT)
 def cancel_appointment(
@@ -313,7 +174,7 @@ def get_exceptions(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_staff)
 ):
-    today_str = dt_date.today().isoformat()
+    today_str = catalog.now_local().date().isoformat()   # hoy en hora del negocio (3f)
     query = db.query(ScheduleException).filter(ScheduleException.date >= today_str)
 
     if current_user.role == UserRole.EMPLOYEE:
@@ -518,10 +379,10 @@ def get_metrics(
         # Si es OWNER: employee_id == current_user.id (Mis Métricas) o None (Todo el Local)
         effective_employee_id = employee_id
 
-    # 2. Rango de fechas en formato ISO (YYYY-MM-DD)
-    today = dt_date.today()
+    # 2. Rango de fechas en formato ISO (YYYY-MM-DD), con el "ahora" del negocio (3f), no el del servidor
+    now_dt = catalog.now_local()
+    today = now_dt.date()
     today_str = today.isoformat()
-    now_dt = datetime.now()
     now_minutes = now_dt.hour * 60 + now_dt.minute
 
     if period == "today":
