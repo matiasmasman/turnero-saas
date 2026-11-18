@@ -2,7 +2,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator, field_valida
 from app import catalog
 from app.models import UserRole
 from typing import Annotated, Optional, List
-from datetime import time, date as dt_date
+from datetime import datetime, time, date as dt_date
 import re
 
 # Ids de la base: enteros estrictos ("3" como texto, 3.0 o true no valen)
@@ -112,6 +112,9 @@ class AppointmentResponse(BaseModel):
     employee_id: int
     employee_name: Optional[str] = None
     wa_link: Optional[str] = None  # link del botón de WhatsApp (None si está apagado)
+    # Bloque 4: quién canceló desde el panel. None en un cancelado = canceló el cliente por WhatsApp.
+    cancelled_by_name: Optional[str] = None
+    cancelled_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True

@@ -1,12 +1,12 @@
 import calendar
 from typing import Annotated, List, Optional, Literal
 from datetime import timedelta
-from fastapi import APIRouter, HTTPException, Depends, Path, status, Query, Request
+from fastapi import APIRouter, HTTPException, Depends, Path, status, Query, Request, Response
 from sqlalchemy.orm import Session
 from sqlalchemy import or_
 from app import catalog
 from app.database import get_db
-from app.models import User, UserRole, Appointment, WorkingHours, ScheduleException
+from app.models import User, UserRole, Appointment, WorkingHours, ScheduleException, WaNotification, utc_now
 from app.schemas import (
     UserResponse,
     AppointmentResponse,
@@ -77,12 +77,19 @@ def get_working_days_config(
 # ENDPOINTS DE AGENDA Y HORARIOS
 # ==========================================
 
+# "Ahora" del negocio para la agenda (Bloque 4, #46): va en un header para no cambiar la forma de la respuesta
+# (sigue siendo una lista de turnos). Hora local del negocio, sin zona, como date/time de los turnos.
+BUSINESS_NOW_HEADER = "X-Business-Now"
+
+
 @router.get("/appointments", response_model=list[AppointmentResponse])
 def get_staff_appointments(
     request: Request,
+    response: Response,
     current_user: User = Depends(get_staff),
     db: Session = Depends(get_db)
 ):
+    response.headers[BUSINESS_NOW_HEADER] = catalog.now_local().isoformat(timespec="seconds")
     query = db.query(Appointment)
 
     if current_user.role == UserRole.EMPLOYEE:
@@ -100,6 +107,9 @@ def get_staff_appointments(
     
     return appointments
 
+ALREADY_CANCELLED = "Ese turno ya estaba cancelado."
+
+
 @router.delete("/appointments/{appointment_id}", status_code=status.HTTP_204_NO_CONTENT)
 def cancel_appointment(
     appointment_id: ItemId,
@@ -107,6 +117,10 @@ def cancel_appointment(
     current_user: User = Depends(get_staff),
     db: Session = Depends(get_db)
 ):
+    """Cancela el turno (Bloque 4): NO lo borra. Queda status='cancelled' con quién y cuándo, y el horario se
+    libera (todo lo que bloquea o cuenta turnos mira solo los 'confirmed'). Anula los avisos de WhatsApp
+    pendientes del turno, igual que la cancelación por WhatsApp. No le avisa al cliente (Entrega 2).
+    Permisos de siempre: el dueño, cualquier turno; el barbero, solo los suyos (si no, 404)."""
     query = db.query(Appointment).filter(Appointment.id == appointment_id)
     
     if current_user.role == UserRole.EMPLOYEE:
@@ -115,13 +129,31 @@ def cancel_appointment(
     appointment = query.first()
     if not appointment:
         raise HTTPException(status_code=404, detail="Turno no encontrado o sin permisos")
-    
-    db.delete(appointment)
+    employee_id = appointment.employee_id
+
+    # UPDATE condicionado a 'confirmed': si dos cancelan a la vez (o el cliente por WhatsApp), solo uno gana.
+    # En PostgreSQL el segundo espera el bloqueo de la fila y, al seguir, ya no la encuentra 'confirmed'.
+    changed = db.query(Appointment).filter(
+        Appointment.id == appointment_id, Appointment.status == "confirmed"
+    ).update({"status": "cancelled", "cancelled_by_id": current_user.id, "cancelled_at": utc_now()},
+             synchronize_session=False)
+    if not changed:
+        db.rollback()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=ALREADY_CANCELLED)
+
+    voided = db.query(WaNotification).filter(
+        WaNotification.appointment_id == appointment_id, WaNotification.status == "pending"
+    ).update({"status": "cancelled", "last_error": "turno cancelado desde el panel"}, synchronize_session=False)
     db.commit()
     
     sec_logger.info(
         f"Turno {appointment_id} cancelado por {current_user.username}",
-        extra=log_extra(request, current_user.id, "APPOINTMENT_CANCELLED", {"appointment_id": appointment_id}),
+        extra=log_extra(request, current_user.id, "APPOINTMENT_CANCELLED", {
+            "appointment_id": appointment_id,
+            "source": "panel",                  # la del cliente por WhatsApp es WA_APPOINTMENT_CANCELLED
+            "employee_id": employee_id,         # el barbero del turno (el que cancela es actor_id)
+            "notifications_voided": voided,
+        }),
     )
     return
 

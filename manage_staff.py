@@ -92,9 +92,10 @@ def cmd_init(default_password: str):
         db.commit()
         print("\n[OK] Staff y horarios (Lun-Sáb 10:00-13:00 y 17:00-20:30) listos en la base de datos.\n")
         if missing_migrations(engine):
-            print("[!] Falta la migración de la Entrega 3. Antes de arrancar la app corré, en orden:\n"
+            print("[!] Falta la migración de la Entrega 3 o del Bloque 4. Antes de arrancar la app corré, en orden:\n"
                   "    venv/bin/python -m scripts.migrate_e3\n"
-                  "    venv/bin/python -m scripts.migrate_e3e\n")
+                  "    venv/bin/python -m scripts.migrate_e3e\n"
+                  "    venv/bin/python -m scripts.migrate_b4\n")
     except Exception as e:
         db.rollback()
         print(f"[ERROR] Falló la inicialización: {e}")

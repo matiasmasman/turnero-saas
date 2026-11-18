@@ -37,7 +37,7 @@ class User(Base):
     price_barba = Column(Integer, default=10000, nullable=False)
     price_corte_barba = Column(Integer, default=18000, nullable=False)
 
-    appointments = relationship("Appointment", back_populates="employee")
+    appointments = relationship("Appointment", back_populates="employee", foreign_keys="Appointment.employee_id")
     working_hours = relationship("WorkingHours", back_populates="employee", cascade="all, delete-orphan")
 
 class Appointment(Base):
@@ -51,7 +51,7 @@ class Appointment(Base):
     time = Column(String, nullable=False)                   # Formato: HH:MM:SS
     duration = Column(Integer, nullable=False, default=30)  # Duración congelada al reservar
     price = Column(Integer, nullable=False, default=15000)  # Precio congelado al reservar
-    status = Column(String, default="confirmed")            # confirmed | cancelled (canceló por WhatsApp)
+    status = Column(String, default="confirmed")            # confirmed | cancelled (nunca se borra un turno)
     employee_id = Column(Integer, ForeignKey("users.id"), nullable=False)
 
     # Entrega 3 (3a): se agregan nulas; en 3a nadie las escribe salvo la migración.
@@ -62,7 +62,14 @@ class Appointment(Base):
                                              ondelete="RESTRICT"), nullable=True)
     discount_name = Column(String(40), nullable=True)       # nombre del descuento al reservar
 
-    employee = relationship("User", back_populates="appointments")
+    # Bloque 4 (migración b4_cancelled_by): quién y cuándo canceló.
+    # cancelled_by_id: el usuario del panel que lo canceló; NULL en un cancelado = canceló el cliente por WhatsApp.
+    cancelled_by_id = Column(Integer, ForeignKey("users.id", name="fk_appointments_cancelled_by_id",
+                                                 ondelete="RESTRICT"), nullable=True)
+    cancelled_at = Column(DateTime(timezone=True), nullable=True)   # UTC; NULL en los cancelados de antes del Bloque 4
+
+    employee = relationship("User", back_populates="appointments", foreign_keys=[employee_id])
+    cancelled_by = relationship("User", foreign_keys=[cancelled_by_id])
 
     @property
     def employee_name(self) -> str:
@@ -73,6 +80,11 @@ class Appointment(Base):
     @employee_name.setter
     def employee_name(self, value: str):
         self._employee_name = value
+
+    @property
+    def cancelled_by_name(self):
+        """Nombre del usuario del panel que canceló; None si no está cancelado o si canceló el cliente por WhatsApp."""
+        return self.cancelled_by.name if self.status == "cancelled" and self.cancelled_by else None
 
 class WorkingHours(Base):
     __tablename__ = "working_hours"

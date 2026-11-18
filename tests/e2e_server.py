@@ -7,17 +7,20 @@ como un proceso aparte.
 Todo queda en la carpeta temporal y nada toca lo real:
 - No lee el .env (app/database.py y app/core/security.py hacen load_dotenv(override=True), que pisaría
   estas variables): se anula load_dotenv, igual que en conftest.py.
-- Base SQLite nueva en <carpeta>/e2e.db: `manage_staff init` + las migraciones e3a y e3e.
+- Base SQLite nueva en <carpeta>/e2e.db: `manage_staff init` + las migraciones e3a, e3e y b4.
 - Log de seguridad en <carpeta>/security.log (SECURITY_LOG_FILE), no en logs/security.log.
 - WhatsApp apagado y SECRET_KEY de prueba.
 - Escucha SOLO en 127.0.0.1, en un puerto libre que elige el sistema. Cuando está listo, escribe el
   puerto en <carpeta>/port.
+- E2E_FAKE_NOW (opcional, ej. "2030-06-05T15:00:00"): congela catalog.now_local(), el "ahora" del negocio.
+  Lo usa test_navegador_bloque4.py para que "Completado" no dependa de la hora en que se corren las pruebas.
 """
 import os
 import socket
 import sys
 import threading
 import time
+from datetime import datetime
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -63,12 +66,20 @@ def main() -> None:
     manage_staff.cmd_init(password)
     from scripts.migrate_e3 import make_engine, migrate
     from scripts.migrate_e3e import migrate as migrate_e3e
+    from scripts.migrate_b4 import migrate as migrate_b4
     engine = make_engine(db_url)
     try:
         migrate(engine)
         migrate_e3e(engine)
+        migrate_b4(engine)
     finally:
         engine.dispose()
+
+    fake_now = os.environ.get("E2E_FAKE_NOW")
+    if fake_now:
+        import app.catalog as catalog
+        frozen = datetime.fromisoformat(fake_now)
+        catalog.now_local = lambda: frozen
 
     import uvicorn
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)

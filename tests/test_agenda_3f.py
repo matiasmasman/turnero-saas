@@ -186,7 +186,8 @@ def test_no_quedan_ahoras_sin_zona_en_admin_ni_en_las_excepciones():
     schemas = (ROOT / "app/schemas.py").read_text(encoding="utf-8")
     for src in (admin, schemas):
         assert "date.today()" not in src and "datetime.now()" not in src
-    assert admin.count("catalog.now_local()") == 2 and schemas.count("catalog.now_local()") == 1
+    # 3 desde el Bloque 4: el header X-Business-Now de GET /admin/appointments (ver test_bloque4.py)
+    assert admin.count("catalog.now_local()") == 3 and schemas.count("catalog.now_local()") == 1
 
 
 # ---------- Frontend (controles estáticos; el navegador de verdad, en test_navegador_3f.py) ----------
@@ -214,5 +215,5 @@ def test_whatsapp_y_cancelar_siguen_como_estaban():
 
 
 def test_versiones_de_cache_subidas():
-    assert 'href="css/panel.css?v=13"' in PANEL_HTML
-    assert 'src="js/panel.js?v=14"' in PANEL_HTML        # v=14 en el Bloque 3 (ver test_bloque3.py)
+    assert 'href="css/panel.css?v=14"' in PANEL_HTML      # v=14 en el Bloque 4 (ver test_bloque4.py)
+    assert 'src="js/panel.js?v=15"' in PANEL_HTML        # v=14 en el Bloque 3, v=15 en el Bloque 4

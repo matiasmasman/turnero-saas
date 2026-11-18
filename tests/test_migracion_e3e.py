@@ -186,11 +186,11 @@ def test_cli_dry_run_aplica_y_avisa_los_nombres_desconocidos(db, monkeypatch, ca
 def test_la_app_exige_e3e(tmp_path):
     engine = mig.make_engine(f"sqlite:///{tmp_path / 'guard.db'}")
     _load(engine)
-    assert schema_guard.missing_migrations(engine) == ["e3e_service_ids"]
+    assert schema_guard.missing_migrations(engine) == ["e3e_service_ids", "b4_cancelled_by"]
     with pytest.raises(RuntimeError, match="scripts.migrate_e3e"):
         schema_guard.ensure_schema_ready(engine)
     mig.migrate(engine, out=quiet)
-    schema_guard.ensure_schema_ready(engine)
+    assert schema_guard.missing_migrations(engine) == ["b4_cancelled_by"]   # la del Bloque 4 va después
     engine.dispose()
 
 
@@ -207,5 +207,5 @@ def test_base_nueva_con_las_dos_migraciones(tmp_path):
     mig_e3a.migrate(engine, out=quiet)
     result = mig.migrate(engine, out=quiet)
     assert result["status"] == "applied" and result["without_service_id_before"] == 0 and result["linked"] == {}
-    assert schema_guard.missing_migrations(engine) == []
+    assert schema_guard.missing_migrations(engine) == ["b4_cancelled_by"]   # la del Bloque 4 va después
     engine.dispose()

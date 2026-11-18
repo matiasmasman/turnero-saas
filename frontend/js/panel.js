@@ -20,6 +20,26 @@ function formatLocalDate(d) {
     return `${year}-${month}-${day}`;
 }
 
+// "Ahora" del negocio (Bloque 4, #46): lo manda el servidor en el header X-Business-Now de GET /admin/appointments
+// (hora local del negocio, sin zona: "2026-11-18T14:05:00"). Se guarda junto con performance.now() para que siga
+// corriendo entre una carga y otra. Sin ese dato (antes de la primera carga), se usa la hora del navegador.
+let businessClock = null;
+
+function setBusinessClock(header) {
+    const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})$/.exec(String(header || ''));
+    if (!m) return;
+    const [, y, mo, d, h, mi, se] = m.map(Number);
+    businessClock = { utcMs: Date.UTC(y, mo - 1, d, h, mi, se), at: performance.now() };
+}
+
+// Un Date con los campos (año, mes, día, hora, minuto) del negocio. Las cuentas se hacen en UTC para que un
+// cambio de horario del navegador no corra la hora.
+function businessNow() {
+    if (!businessClock) return new Date();
+    const t = new Date(businessClock.utcMs + (performance.now() - businessClock.at));
+    return new Date(t.getUTCFullYear(), t.getUTCMonth(), t.getUTCDate(), t.getUTCHours(), t.getUTCMinutes(), t.getUTCSeconds());
+}
+
 function formatARS(amount) {
     return '$' + Number(amount || 0).toLocaleString('es-AR');
 }
@@ -134,7 +154,7 @@ async function loadWorkingDaysConfig(token) {
 // ==========================================
 
 function getWeekDaysArray(weekOffset = 0) {
-    const now = new Date();
+    const now = businessNow();
     const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
     const currentDayIndex = (today.getDay() + 6) % 7;
 
@@ -165,7 +185,7 @@ function getActiveWorkingDays() {
 function getMinWeekOffset(activeWorkingDays, onlyToday) {
     if (onlyToday) return 0;
 
-    const todayStr = formatLocalDate(new Date());
+    const todayStr = formatLocalDate(businessNow());
     const currentWeekDays = getWeekDaysArray(0);
 
     const hasRemainingWorkingDays = currentWeekDays.some(
@@ -264,13 +284,35 @@ async function fetchAppointments(token) {
             headers: { 'Authorization': `Bearer ${token}` }
         });
         if (response.status === 401) return sessionExpired();
-        if (!response.ok) return logout();
+        // Otro error (500, 502...): se avisa y la sesión sigue (#49). Solo el 401 manda al login.
+        if (!response.ok) return showAgendaError();
         const appointments = await response.json();
+        setBusinessClock(response.headers.get('X-Business-Now'));
         allAppointmentsCache = appointments;
         renderAgenda(appointments);
     } catch (error) {
-        document.getElementById('agendaContent').innerHTML = 'Error al cargar.';
+        showAgendaError();                      // sin conexión o respuesta que no es JSON
     }
+}
+
+function showAgendaError() {
+    document.getElementById('agendaContent').textContent = 'Error al cargar.';
+}
+
+// Estado para mostrar (Bloque 4). "Completado" no está en la base: es un turno confirmado que ya terminó
+// (inicio + duración) según la hora del negocio.
+const APPT_ORDER = { upcoming: 0, completed: 1, cancelled: 2 };
+
+function startMinutes(app) {
+    const [h, m] = String(app.time).split(':').map(Number);
+    return (h * 60) + m;
+}
+
+function appointmentState(app, todayStr, nowMinutes) {
+    if (app.status === 'cancelled') return 'cancelled';
+    const end = startMinutes(app) + (Number(app.duration) || 30);
+    if (app.date < todayStr || (app.date === todayStr && end <= nowMinutes)) return 'completed';
+    return 'upcoming';
 }
 
 // Escapa TODO lo que viene del servidor antes de meterlo en innerHTML (anti-XSS). Los números van con Number().
@@ -290,7 +332,9 @@ function renderAgenda(appointments) {
 
     const onlyToday = document.getElementById('onlyTodayCheck')?.checked;
     const showAllShop = document.getElementById('onlyMineCheck')?.checked;
-    const todayStr = formatLocalDate(new Date());
+    const now = businessNow();
+    const todayStr = formatLocalDate(now);
+    const nowMinutes = (now.getHours() * 60) + now.getMinutes();
 
     const isOwner = currentUser && String(currentUser.role || '').toLowerCase() === 'owner';
     const activeWorkingDays = getActiveWorkingDays();
@@ -341,7 +385,10 @@ function renderAgenda(appointments) {
         visibleDaysCount++;
         const isToday = (dateStr === todayStr);
         const dayLabel = `${diasSemanaNombres[dayOfWeek]} ${formatShort(dateObj)}${isToday ? ' (Hoy)' : ''}`;
-        const dayApps = groupedByDate[dateStr] || [];
+        // Dentro del día: primero los que vienen, después los completados y al final los cancelados (cada grupo por hora)
+        const dayApps = (groupedByDate[dateStr] || [])
+            .map(app => ({ app, state: appointmentState(app, todayStr, nowMinutes) }))
+            .sort((a, b) => (APPT_ORDER[a.state] - APPT_ORDER[b.state]) || (startMinutes(a.app) - startMinutes(b.app)));
 
         let dayHtml = `
         <div class="day-group">
@@ -356,10 +403,9 @@ function renderAgenda(appointments) {
                 </div>
             `;
         } else {
-            dayApps.forEach(app => {
-                const [h, m] = app.time.split(':').map(Number);
-                const durationMin = app.duration || 30;
-                const totalEndMinutes = (h * 60) + m + durationMin;
+            dayApps.forEach(({ app, state }) => {
+                const durationMin = Number(app.duration) || 30;
+                const totalEndMinutes = startMinutes(app) + durationMin;
                 const endH = Math.floor(totalEndMinutes / 60) % 24;
                 const endM = totalEndMinutes % 60;
                 const endTime = `${String(endH).padStart(2, '0')}:${String(endM).padStart(2, '0')}`;
@@ -367,7 +413,8 @@ function renderAgenda(appointments) {
                 const barberBadge = (isOwner && app.employee_name)
                     ? `<span class="barber-tag">${escapeHtml(app.employee_name)}</span>`
                     : '';
-                const isCancelled = app.status === 'cancelled';
+                const isCancelled = state === 'cancelled';
+                const isCompleted = state === 'completed';
                 const safePhone = String(app.client_phone || '').replace(/\D/g, '');
                 const safeId = Number(app.id);
 
@@ -377,14 +424,23 @@ function renderAgenda(appointments) {
                 const priceText = formatARS(app.price) + (discountName ? ` · ${discountName}` : '');
                 const priceBadgeHtml = `<span class="price-tag">${escapeHtml(priceText)}</span>`;
 
+                // Cancelado: sin precio (3f) y con quién lo canceló. Sin nombre = lo canceló el cliente por WhatsApp.
+                const cancelledText = app.cancelled_by_name
+                    ? `Cancelado por ${escapeHtml(app.cancelled_by_name)}`
+                    : 'Canceló por WhatsApp';
+                const statusHtml = isCancelled
+                    ? `<span class="cancelled-tag">${cancelledText}</span>`
+                    : (isCompleted ? '<span class="completed-tag">Completado</span>' : '') + priceBadgeHtml;
+                const stateClass = isCancelled ? 'appt-cancelled' : (isCompleted ? 'appt-completed' : '');
+
                 dayHtml += `
-                    <div class="appointment-item ${isCancelled ? 'appt-cancelled' : ''}">
+                    <div class="appointment-item ${stateClass}">
                         <div class="appt-details">
                             <h3 class="appt-time">${escapeHtml(String(app.time).substring(0, 5))} - ${endTime}</h3>
                             <div class="name">${escapeHtml(app.client_name)}</div>
                             <div class="service-meta">
                                 <span class="service">${escapeHtml(app.service)}</span>
-                                ${isCancelled ? '<span class="cancelled-tag">Canceló por WhatsApp</span>' : priceBadgeHtml}
+                                ${statusHtml}
                                 ${barberBadge}
                             </div>
                         </div>
@@ -413,7 +469,7 @@ function abrirWpp(phone) {
 }
 
 async function cancelarTurno(id) {
-    if (!confirm('¿Seguro que querés cancelar este turno? Esta acción no se puede deshacer.')) return;
+    if (!confirm('¿Seguro que querés cancelar este turno? No se puede deshacer y el cliente no recibe aviso: avisale vos por WhatsApp.')) return;
 
     const token = localStorage.getItem('access_token');
     try {
@@ -423,6 +479,9 @@ async function cancelarTurno(id) {
         });
         if (response.status === 401) return sessionExpired();
         if (response.ok) {
+            fetchAppointments(token);
+        } else if (response.status === 409) {
+            alert('Ese turno ya estaba cancelado.');   // lo canceló otro (o el cliente) mientras tanto
             fetchAppointments(token);
         } else {
             alert('No se pudo cancelar el turno.');

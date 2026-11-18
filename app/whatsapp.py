@@ -29,7 +29,7 @@ from zoneinfo import ZoneInfo
 
 from app.core.telemetry import sec_logger
 from app.database import SessionLocal
-from app.models import Appointment, WaNotification, WaOptin
+from app.models import Appointment, WaNotification, WaOptin, utc_now
 
 # ---------- Configuración (.env) ----------
 ENABLED = os.getenv("WHATSAPP_ENABLED", "false").lower() == "true"
@@ -585,6 +585,7 @@ class Dispatcher:
             return
 
         appt.status = "cancelled"   # libera el horario y queda en el historial
+        appt.cancelled_at = utc_now()   # Bloque 4; cancelled_by_id queda NULL = "Canceló por WhatsApp"
         db.query(WaNotification).filter(
             WaNotification.appointment_id == appt.id, WaNotification.status == "pending"
         ).update({"status": "cancelled", "last_error": "el cliente canceló por WhatsApp"})
@@ -592,7 +593,7 @@ class Dispatcher:
         db.commit()
         # appt_id (variable local), no appt.id: después del commit, appt.id vuelve a consultar la base
         log("info", "WA_APPOINTMENT_CANCELLED", "Cliente canceló su turno por WhatsApp",
-            appointment_id=appt_id, jid=mask(jid))
+            appointment_id=appt_id, source="whatsapp", jid=mask(jid))
 
     # --- Envíos ---
     def send_due(self):

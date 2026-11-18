@@ -1152,7 +1152,7 @@ select:focus {
 }
 
 /* ==========================================
-   v2.2 · Turnos cancelados por el cliente (WhatsApp)
+   v2.2 · Turnos cancelados (por el cliente por WhatsApp o, desde el Bloque 4, desde el panel)
    ========================================== */
 .appointment-item.appt-cancelled .appt-time,
 .appointment-item.appt-cancelled .name,
@@ -1167,6 +1167,25 @@ select:focus {
     color: #fca5a5;
     background-color: rgba(239, 68, 68, 0.12);
     border: 1px solid rgba(239, 68, 68, 0.35);
+    padding: 2px 8px;
+    border-radius: 6px;
+    max-width: 100%;
+    overflow-wrap: anywhere;              /* "Cancelado por {nombre largo}" no ensancha la fila */
+}
+
+/* ==========================================
+   Bloque 4 · Turnos completados (confirmados que ya terminaron): más opacos, con Cancelar igual
+   ========================================== */
+.appointment-item.appt-completed .appt-details {
+    opacity: 0.6;
+}
+
+.completed-tag {
+    font-size: 0.74rem;
+    font-weight: 600;
+    color: #94a3b8;
+    background-color: rgba(148, 163, 184, 0.12);
+    border: 1px solid rgba(148, 163, 184, 0.35);
     padding: 2px 8px;
     border-radius: 6px;
 }

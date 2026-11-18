@@ -378,7 +378,10 @@ def test_eventos_del_panel_llevan_ip_request_id_y_actor(api, staff, log, monkeyp
         found = of(log, event_type)
         assert len(found) == 1, event_type
         _assert_from_request(found[0], staff["ids"][who])
-    assert of(log, "APPOINTMENT_CANCELLED")[0]["metadata"] == {"appointment_id": appt_id}
+    # Bloque 4: el evento suma source, el barbero del turno y cuántos avisos anuló (ver test_bloque4.py)
+    assert of(log, "APPOINTMENT_CANCELLED")[0]["metadata"] == {
+        "appointment_id": appt_id, "source": "panel", "employee_id": staff["ids"]["employee"],
+        "notifications_voided": 0}
 
 
 def test_eventos_de_login_llevan_ip(api, users, clock, log):
@@ -554,6 +557,6 @@ def test_todo_401_del_panel_va_a_sesion_vencida():
 
 
 def test_versiones_de_cache_subidas():
-    assert 'src="js/panel.js?v=14"' in PANEL_HTML
+    assert 'src="js/panel.js?v=15"' in PANEL_HTML          # v=15 en el Bloque 4
     assert 'src="js/my-services.js?v=3"' in PANEL_HTML
     assert 'src="js/owner-catalog.js?v=2"' in PANEL_HTML
