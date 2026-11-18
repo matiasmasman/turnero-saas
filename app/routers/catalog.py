@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 
 from app.catalog import (current_business_id, future_appointments_for_discount,
                          future_appointments_for_service, name_taken)
+from app.core.request_info import log_extra
 from app.core.telemetry import sec_logger
 from app.database import get_db
 from app.dependencies import get_owner
@@ -32,13 +33,7 @@ def _ars(n: int) -> str:
 
 
 def _log(request: Request, actor: User, event_type: str, message: str, metadata: dict):
-    sec_logger.info(message, extra={
-        "event_type": event_type,
-        "request_id": getattr(request.state, "request_id", None),
-        "ip_address": getattr(request.state, "client_ip", None),
-        "actor_id": actor.id,
-        "metadata": metadata,
-    })
+    sec_logger.info(message, extra=log_extra(request, actor.id, event_type, metadata))
 
 
 def _commit_or_conflict(db: Session, what: str, name: str):

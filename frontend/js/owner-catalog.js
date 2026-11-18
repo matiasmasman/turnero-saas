@@ -1,7 +1,7 @@
 // "Servicios del local" y "Descuentos" (Entrega 3d): pantallas SOLO del dueño sobre la API del catálogo (3b).
 // Seguridad: los nombres van SIEMPRE con textContent (nunca innerHTML) y los eventos con addEventListener
 // (sin onclick en el HTML). Los precios los valida siempre el servidor: acá solo se revisa el formato.
-// Usa API_URL, logout() y showX() de panel.js.
+// Usa API_URL, sessionExpired() y showX() de panel.js.
 (function () {
     'use strict';
 
@@ -85,7 +85,7 @@
         }
         const res = await fetch(`${API_URL}/admin/catalog${path}`, options);
         if (res.status === 401) {
-            logout();
+            sessionExpired();
             throw new SessionEnded();
         }
         const data = await res.json().catch(() => ({}));

@@ -22,6 +22,7 @@ from sqlalchemy.orm import Session
 
 from app import catalog
 from app.catalog import PRICE_MIN, CatalogError, public_business_id, quote_price
+from app.core.request_info import log_extra
 from app.core.telemetry import sec_logger
 from app.database import get_db
 from app.models import (Appointment, BarberService, Discount, DiscountPrice, ScheduleException, Service, User,
@@ -409,13 +410,10 @@ def create_appointment(
                 error = HTTPException(status.HTTP_400_BAD_REQUEST,
                                       "No hay ningún barbero disponible en ese horario para ese servicio.")
             if error.status_code == status.HTTP_409_CONFLICT:
-                sec_logger.info("Reserva rechazada: horario ocupado", extra={
-                    "event_type": "APPOINTMENT_SLOT_TAKEN",
-                    "request_id": getattr(request.state, "request_id", None),
-                    "ip_address": getattr(request.state, "client_ip", None),
-                    "metadata": {"date": day.isoformat(), "time": appointment_data.time,
-                                 "service_id": quote.service_id, "employee_id": appointment_data.employee_id},
-                })
+                sec_logger.info("Reserva rechazada: horario ocupado", extra=log_extra(
+                    request, None, "APPOINTMENT_SLOT_TAKEN",
+                    {"date": day.isoformat(), "time": appointment_data.time,
+                     "service_id": quote.service_id, "employee_id": appointment_data.employee_id}))
             raise error
 
         # "Cualquiera": el que tiene menos turnos ese día; si empatan, al azar
@@ -441,20 +439,17 @@ def create_appointment(
 
         sec_logger.info(
             f"Nuevo turno registrado para {appointment_data.client_name}",
-            extra={
-                "event_type": "APPOINTMENT_CREATED",
-                "metadata": {
-                    "date": new_appointment.date,
-                    "time": new_appointment.time,
-                    "service": new_appointment.service,
-                    "service_id": new_appointment.service_id,
-                    "discount_id": new_appointment.discount_id,
-                    "discount_name": new_appointment.discount_name,
-                    "duration": new_appointment.duration,
-                    "price": new_appointment.price,
-                    "assigned_to": new_appointment.employee_id
-                }
-            }
+            extra=log_extra(request, None, "APPOINTMENT_CREATED", {   # reserva pública: sin usuario logueado
+                "date": new_appointment.date,
+                "time": new_appointment.time,
+                "service": new_appointment.service,
+                "service_id": new_appointment.service_id,
+                "discount_id": new_appointment.discount_id,
+                "discount_name": new_appointment.discount_name,
+                "duration": new_appointment.duration,
+                "price": new_appointment.price,
+                "assigned_to": new_appointment.employee_id
+            })
         )
 
         result = PublicAppointmentOut(

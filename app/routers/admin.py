@@ -1,7 +1,7 @@
 import calendar
-from typing import List, Optional, Literal
+from typing import Annotated, List, Optional, Literal
 from datetime import timedelta
-from fastapi import APIRouter, HTTPException, Depends, status, Query
+from fastapi import APIRouter, HTTPException, Depends, Path, status, Query, Request
 from sqlalchemy.orm import Session
 from sqlalchemy import or_
 from app import catalog
@@ -18,9 +18,13 @@ from app.schemas import (
     MetricsResponse,
 )
 from app.dependencies import get_staff
+from app.core.request_info import log_extra
 from app.core.telemetry import sec_logger
 
 router = APIRouter(prefix="/admin", tags=["Administración (Staff y Dueño)"])
+
+# Ids de la URL: enteros de 1 a 2^31-1, como ItemId en catalog.py (más grande, PostgreSQL daría 500 en vez de 404/422)
+ItemId = Annotated[int, Path(ge=1, le=2_147_483_647)]
 
 def _time_str_to_minutes(t_str: str) -> int:
     parts = t_str.strip().split(":")
@@ -75,6 +79,7 @@ def get_working_days_config(
 
 @router.get("/appointments", response_model=list[AppointmentResponse])
 def get_staff_appointments(
+    request: Request,
     current_user: User = Depends(get_staff),
     db: Session = Depends(get_db)
 ):
@@ -90,18 +95,15 @@ def get_staff_appointments(
     
     sec_logger.info(
         f"Agenda consultada por {current_user.username}",
-        extra={
-            "event_type": "AGENDA_VIEWED",
-            "actor_id": current_user.id,
-            "metadata": {"role": current_user.role.value}
-        }
+        extra=log_extra(request, current_user.id, "AGENDA_VIEWED", {"role": current_user.role.value}),
     )
     
     return appointments
 
 @router.delete("/appointments/{appointment_id}", status_code=status.HTTP_204_NO_CONTENT)
 def cancel_appointment(
-    appointment_id: int,
+    appointment_id: ItemId,
+    request: Request,
     current_user: User = Depends(get_staff),
     db: Session = Depends(get_db)
 ):
@@ -119,7 +121,7 @@ def cancel_appointment(
     
     sec_logger.info(
         f"Turno {appointment_id} cancelado por {current_user.username}",
-        extra={"event_type": "APPOINTMENT_CANCELLED"}
+        extra=log_extra(request, current_user.id, "APPOINTMENT_CANCELLED", {"appointment_id": appointment_id}),
     )
     return
 
@@ -134,6 +136,7 @@ def get_my_schedule(
 @router.post("/schedule")
 def update_my_schedule(
     schedule_data: WorkingHoursUpdate,
+    request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_staff)
 ):
@@ -157,10 +160,7 @@ def update_my_schedule(
 
     sec_logger.info(
         f"Horarios laborales actualizados por {current_user.username}",
-        extra={
-            "event_type": "SCHEDULE_UPDATED",
-            "actor_id": current_user.id
-        }
+        extra=log_extra(request, current_user.id, "SCHEDULE_UPDATED", {}),
     )
     
     return {"message": "Horarios actualizados correctamente"}
@@ -209,6 +209,7 @@ def get_exceptions(
 @router.post("/exceptions", response_model=ExceptionResponse, status_code=status.HTTP_201_CREATED)
 def create_exception(
     payload: ExceptionCreate,
+    request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_staff)
 ):
@@ -218,11 +219,7 @@ def create_exception(
         if current_user.role != UserRole.OWNER:
             sec_logger.warning(
                 f"Violación RBAC: Empleado {current_user.username} intentó crear un bloqueo global",
-                extra={
-                    "event_type": "RBAC_VIOLATION_GLOBAL_EXCEPTION",
-                    "actor_id": current_user.id,
-                    "metadata": {"date": payload.date}
-                }
+                extra=log_extra(request, current_user.id, "RBAC_VIOLATION_GLOBAL_EXCEPTION", {"date": payload.date}),
             )
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
@@ -280,18 +277,14 @@ def create_exception(
 
     sec_logger.info(
         f"Excepción de horario creada por {current_user.username} para el {payload.date}",
-        extra={
-            "event_type": "EXCEPTION_CREATED",
-            "actor_id": current_user.id,
-            "metadata": {
-                "exception_id": new_exc.id,
-                "date": payload.date,
-                "start_time": payload.start_time,
-                "end_time": payload.end_time,
-                "is_global": payload.is_global,
-                "affected_appointments": affected
-            }
-        }
+        extra=log_extra(request, current_user.id, "EXCEPTION_CREATED", {
+            "exception_id": new_exc.id,
+            "date": payload.date,
+            "start_time": payload.start_time,
+            "end_time": payload.end_time,
+            "is_global": payload.is_global,
+            "affected_appointments": affected
+        }),
     )
 
     return ExceptionResponse(
@@ -307,7 +300,8 @@ def create_exception(
 
 @router.delete("/exceptions/{exception_id}", status_code=status.HTTP_200_OK)
 def delete_exception(
-    exception_id: int,
+    exception_id: ItemId,
+    request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_staff)
 ):
@@ -321,11 +315,8 @@ def delete_exception(
     if current_user.role == UserRole.EMPLOYEE and exc.employee_id != current_user.id:
         sec_logger.warning(
             f"Intento IDOR: {current_user.username} intentó borrar la excepción {exception_id} ajena",
-            extra={
-                "event_type": "IDOR_ATTEMPT_EXCEPTION_DELETE",
-                "actor_id": current_user.id,
-                "metadata": {"target_exception_id": exception_id, "owner_id": exc.employee_id}
-            }
+            extra=log_extra(request, current_user.id, "IDOR_ATTEMPT_EXCEPTION_DELETE",
+                            {"target_exception_id": exception_id, "owner_id": exc.employee_id}),
         )
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -337,11 +328,7 @@ def delete_exception(
 
     sec_logger.info(
         f"Excepción {exception_id} eliminada por {current_user.username}",
-        extra={
-            "event_type": "EXCEPTION_DELETED",
-            "actor_id": current_user.id,
-            "metadata": {"exception_id": exception_id, "date": exc.date}
-        }
+        extra=log_extra(request, current_user.id, "EXCEPTION_DELETED", {"exception_id": exception_id, "date": exc.date}),
     )
 
     return {"message": "Excepción eliminada correctamente"}
@@ -352,6 +339,7 @@ def delete_exception(
 
 @router.get("/metrics", response_model=MetricsResponse)
 def get_metrics(
+    request: Request,
     period: Literal["today", "week", "month"] = Query("month", description="Período: today, week o month"),
     employee_id: Optional[int] = Query(None, ge=1, description="Filtro de barbero (Solo propio ID o None para Todo el Local)"),
     db: Session = Depends(get_db),
@@ -362,11 +350,8 @@ def get_metrics(
     if employee_id is not None and employee_id != current_user.id:
         sec_logger.warning(
             f"Intento de acceso a métricas individuales ajenas por {current_user.username} (target ID {employee_id})",
-            extra={
-                "event_type": "IDOR_ATTEMPT_METRICS_ACCESS",
-                "actor_id": current_user.id,
-                "metadata": {"target_employee_id": employee_id, "period": period, "role": current_user.role.value}
-            }
+            extra=log_extra(request, current_user.id, "IDOR_ATTEMPT_METRICS_ACCESS",
+                            {"target_employee_id": employee_id, "period": period, "role": current_user.role.value}),
         )
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -520,14 +505,10 @@ def get_metrics(
 
     sec_logger.info(
         f"Métricas consultadas por {current_user.username} ({period})",
-        extra={
-            "event_type": "METRICS_VIEWED",
-            "actor_id": current_user.id,
-            "metadata": {
-                "period": period,
-                "filter_employee_id": effective_employee_id
-            }
-        }
+        extra=log_extra(request, current_user.id, "METRICS_VIEWED", {
+            "period": period,
+            "filter_employee_id": effective_employee_id
+        }),
     )
 
     return MetricsResponse(

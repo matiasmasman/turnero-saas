@@ -1,10 +1,11 @@
 from fastapi import Depends, HTTPException, status, Request
 from fastapi.security import OAuth2PasswordBearer
-from jose import jwt, JWTError
+from jose import JWTError
 from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models import User, UserRole
-from app.core.security import SECRET_KEY, ALGORITHM
+from app.core.request_info import log_extra
+from app.core.security import decode_access_token
 from app.core.telemetry import sec_logger
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/login")
@@ -16,27 +17,19 @@ def get_current_user(request: Request, token: str = Depends(oauth2_scheme), db: 
         headers={"WWW-Authenticate": "Bearer"},
     )
     try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        user_id: str = payload.get("sub")
-        if user_id is None:
-            raise credentials_exception
-    except JWTError:
+        payload = decode_access_token(token)   # exige exp y sub, algoritmo fijo, máximo 24 h
+        user_id = int(payload.get("sub"))
+    except (JWTError, TypeError, ValueError):
         raise credentials_exception
 
-    user = db.query(User).filter(User.id == int(user_id)).first()
+    user = db.query(User).filter(User.id == user_id).first()
     if user is None:
         raise credentials_exception
 
     if not user.is_active:
         sec_logger.warning(
             f"Sesión revocada: el usuario inactivo {user.username} intentó usar un token activo.",
-            extra={
-                "event_type": "SESSION_REVOKED_INACTIVE_USER",
-                "request_id": getattr(request.state, "request_id", None),
-                "ip_address": getattr(request.state, "client_ip", None),
-                "actor_id": user.id,
-                "metadata": {"username": user.username}
-            }
+            extra=log_extra(request, user.id, "SESSION_REVOKED_INACTIVE_USER", {"username": user.username}),
         )
         raise credentials_exception
 
@@ -47,13 +40,8 @@ def require_role(allowed_roles: list[UserRole]):
         if current_user.role not in allowed_roles:
             sec_logger.warning(
                 f"Acceso denegado. El usuario {current_user.username} intentó acceder a una ruta restringida.",
-                extra={
-                    "event_type": "RBAC_VIOLATION",
-                    "request_id": getattr(request.state, "request_id", None),
-                    "ip_address": getattr(request.state, "client_ip", None),
-                    "actor_id": current_user.id,
-                    "metadata": {"required_roles": [r.value for r in allowed_roles]}
-                }
+                extra=log_extra(request, current_user.id, "RBAC_VIOLATION",
+                                {"required_roles": [r.value for r in allowed_roles]}),
             )
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No tenés permisos suficientes")
         return current_user

@@ -1,10 +1,11 @@
+import os
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from app.core.login_limiter import LoginLimiter
 from app.core.middleware import SecurityTelemetryMiddleware
 from app.core.schema import ensure_schema_ready
-from app.core.telemetry import sec_logger
 from app.database import engine
 from app.routers import auth, appointments, admin, catalog, my_services
 from app.whatsapp import dispatcher
@@ -34,7 +35,18 @@ async def lifespan(app: FastAPI):
     dispatcher.stop()
 
 
-app = FastAPI(title="Turnero SaaS - Blue Team Edition", lifespan=lifespan)
+def docs_settings() -> dict:
+    """/docs, /redoc y /openapi.json: APAGADOS por defecto (Bloque 3, #28). Se prenden solo con
+    API_DOCS=true, exacto (ni "True", ni "1", ni "yes"). Apagados, esas rutas dan 404."""
+    if os.getenv("API_DOCS") == "true":
+        return {}                               # los valores de siempre de FastAPI
+    return {"docs_url": None, "redoc_url": None, "openapi_url": None}
+
+
+app = FastAPI(title="Turnero SaaS - Blue Team Edition", lifespan=lifespan, **docs_settings())
+
+# Límite de intentos de login, en memoria: vale porque hay UN solo worker (ver app/core/login_limiter.py)
+app.state.login_limiter = LoginLimiter()
 
 app.add_middleware(
     CORSMiddleware,
@@ -56,20 +68,6 @@ app.include_router(my_services.router)
 @app.get("/health")
 def read_root():
     return {"message": "El sistema está arriba y siendo monitoreado"}
-
-
-@app.get("/test-alert")
-def trigger_alert(request: Request):
-    sec_logger.warning(
-        "Intento de acceso a ruta de prueba de seguridad",
-        extra={
-            "event_type": "SECURITY_PROBE",
-            "request_id": request.state.request_id,
-            "ip_address": request.state.client_ip,
-            "metadata": {"endpoint": "/test-alert"}
-        }
-    )
-    return {"message": "Alerta registrada en los logs"}
 
 
 app.mount("/", FrontendFiles(directory="frontend", html=True), name="frontend")

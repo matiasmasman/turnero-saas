@@ -106,7 +106,8 @@ def test_los_endpoints_viejos_ya_no_existen(api, staff, events, method, path, bo
 
 
 def test_tampoco_estan_en_openapi(api):
-    paths = api.client.get("/openapi.json").json()["paths"]
+    # Bloque 3 (#28): /openapi.json está apagado por defecto; el esquema se arma igual con app.openapi()
+    paths = api.client.app.openapi()["paths"]
     assert "/admin/service-durations" not in paths
     assert "/admin/service-prices" not in paths
     assert not [p for p in paths if p.endswith("/price")]
@@ -214,4 +215,4 @@ def test_whatsapp_y_cancelar_siguen_como_estaban():
 
 def test_versiones_de_cache_subidas():
     assert 'href="css/panel.css?v=13"' in PANEL_HTML
-    assert 'src="js/panel.js?v=13"' in PANEL_HTML
+    assert 'src="js/panel.js?v=14"' in PANEL_HTML        # v=14 en el Bloque 3 (ver test_bloque3.py)

@@ -38,7 +38,8 @@ def test_los_nombres_van_con_textcontent_y_los_eventos_con_addeventlistener():
 
 
 def test_sesion_vencida_va_al_login():
-    assert "if (res.status === 401) {\n            logout();" in JS
+    # Bloque 3: con 401 va al login CON el aviso "Tu sesión venció" (sessionExpired llama a logout)
+    assert "if (res.status === 401) {\n            sessionExpired();" in JS
 
 
 def test_las_tarjetas_nuevas_no_tienen_onclick_ni_estilos_en_linea():
@@ -69,8 +70,8 @@ def test_escapehtml_escapa_la_comilla_simple():
 def test_versiones_de_cache_subidas():
     # panel.css y panel.js subieron a v=13 en el 3f (ver test_agenda_3f.py)
     assert 'href="css/panel.css?v=' in HTML and 'src="js/panel.js?v=' in HTML
-    assert 'src="js/owner-catalog.js?v=1"' in HTML
-    assert HTML.index('js/panel.js?v=') < HTML.index('js/owner-catalog.js?v=1')
+    assert 'src="js/owner-catalog.js?v=2"' in HTML      # v=2 en el Bloque 3 (401 → sessionExpired)
+    assert HTML.index('js/panel.js?v=') < HTML.index('js/owner-catalog.js?v=2')
 
 
 def test_sin_textos_provisorios_de_por_ahora():

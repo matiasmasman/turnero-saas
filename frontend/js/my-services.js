@@ -1,6 +1,6 @@
 // "Mis servicios" (Entrega 3c): cada barbero elige qué servicios hace y cuánto tarda en cada uno.
 // Seguridad: los nombres de servicios van SIEMPRE con textContent (nunca innerHTML) y los eventos
-// con addEventListener (sin onclick en el HTML). Usa API_URL y logout() de panel.js.
+// con addEventListener (sin onclick en el HTML). Usa API_URL y sessionExpired() de panel.js.
 (function () {
     'use strict';
 
@@ -110,7 +110,7 @@
         list.replaceChildren(make('p', 'empty-exceptions', 'Cargando...'));
         try {
             const res = await fetch(`${API_URL}/admin/my-services`, { headers: authHeaders() });
-            if (res.status === 401) return logout();
+            if (res.status === 401) return sessionExpired();
             if (!res.ok) throw new Error(`HTTP ${res.status}`);
             const data = await res.json();
             render(Array.isArray(data.services) ? data.services : []);
@@ -144,7 +144,7 @@
                 headers: authHeaders({ 'Content-Type': 'application/json' }),
                 body: JSON.stringify({ services }),
             });
-            if (res.status === 401) return logout();
+            if (res.status === 401) return sessionExpired();
             const data = await res.json().catch(() => ({}));
             if (!res.ok) {
                 setStatus(errorText(data), 'error');

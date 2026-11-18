@@ -55,9 +55,9 @@ def test_no_queda_la_pantalla_vieja_de_duraciones():
 
 def test_versiones_de_cache_subidas():
     # panel.css y panel.js: v=12 en el 3d, v=13 en el 3f (ver test_agenda_3f.py); my-services.js a v=2 en el 3e
-    assert 'src="js/my-services.js?v=2"' in HTML
-    # my-services.js va después de panel.js (usa API_URL, logout y showX de panel.js)
-    assert HTML.index('js/panel.js?v=') < HTML.index('js/my-services.js?v=2')
+    assert 'src="js/my-services.js?v=3"' in HTML        # v=3 en el Bloque 3 (401 → sessionExpired)
+    # my-services.js va después de panel.js (usa API_URL, sessionExpired y showX de panel.js)
+    assert HTML.index('js/panel.js?v=') < HTML.index('js/my-services.js?v=3')
 
 
 def test_sin_textos_provisorios_de_la_reserva_vieja():

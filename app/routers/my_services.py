@@ -12,6 +12,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.catalog import current_business_id, future_appointments_for_service
+from app.core.request_info import log_extra
 from app.core.telemetry import sec_logger
 from app.database import get_db
 from app.dependencies import get_staff
@@ -112,15 +113,11 @@ def put_my_services(payload: MyServicesUpdate, request: Request,
             db.rollback()
             raise HTTPException(status.HTTP_409_CONFLICT, SAVED_AT_THE_SAME_TIME)
         snap = lambda st, sid: {"service_id": sid, "does": st[sid][0], "duration": st[sid][1]}  # noqa: E731
-        sec_logger.info(f"Servicios del barbero {current_user.id} actualizados por {current_user.username}", extra={
-            "event_type": "BARBER_SERVICES_UPDATED",
-            "request_id": getattr(request.state, "request_id", None),
-            "ip_address": getattr(request.state, "client_ip", None),
-            "actor_id": current_user.id,
-            "metadata": {"business_id": business_id, "employee_id": current_user.id,
-                         "old": [snap(before, sid) for sid in changed_ids],
-                         "new": [snap(after, sid) for sid in changed_ids]},
-        })
+        sec_logger.info(f"Servicios del barbero {current_user.id} actualizados por {current_user.username}",
+                        extra=log_extra(request, current_user.id, "BARBER_SERVICES_UPDATED", {
+                            "business_id": business_id, "employee_id": current_user.id,
+                            "old": [snap(before, sid) for sid in changed_ids],
+                            "new": [snap(after, sid) for sid in changed_ids]}))
     else:
         db.rollback()
 

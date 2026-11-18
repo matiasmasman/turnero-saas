@@ -64,6 +64,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
 async function initSession(token) {
     const ok = await loadCurrentUser(token);
+    if (ok === 'expired') return sessionExpired();
     if (!ok) return logout();
     await loadWorkingDaysConfig(token);
     showDashboard();
@@ -75,6 +76,7 @@ async function loadCurrentUser(token) {
         const res = await fetch(`${API_URL}/admin/me`, {
             headers: { 'Authorization': `Bearer ${token}` }
         });
+        if (res.status === 401) return 'expired';
         if (!res.ok) return false;
 
         currentUser = await res.json();
@@ -118,6 +120,7 @@ async function loadWorkingDaysConfig(token) {
         const res = await fetch(`${API_URL}/admin/working-days`, {
             headers: { 'Authorization': `Bearer ${token}` }
         });
+        if (res.status === 401) return sessionExpired();
         if (res.ok) {
             workingDaysConfig = await res.json();
         }
@@ -200,8 +203,35 @@ function resetToCurrentWeek() {
 // LOGIN Y CARGA DE TURNOS
 // ==========================================
 
+// Mensajes del login: dentro del formulario (#loginError), con textContent. Sin alert().
+const LOGIN_MESSAGES = {
+    expired: 'Tu sesión venció. Entrá de nuevo.',
+    429: 'Demasiados intentos. Probá de nuevo en unos minutos.',
+    403: 'Esta cuenta está desactivada.',
+    bad: 'Usuario o contraseña incorrectos.',
+    network: 'No se pudo conectar con el servidor. Probá de nuevo.',
+};
+
+function showLoginMessage(text) {
+    const el = document.getElementById('loginError');
+    if (!el) return;
+    el.textContent = text || '';
+    el.hidden = !text;
+}
+
+// Al cargar: si venimos de una sesión vencida, se avisa una sola vez
+(function showPendingLoginNotice() {
+    let notice = null;
+    try {
+        notice = sessionStorage.getItem('login_notice');
+        sessionStorage.removeItem('login_notice');
+    } catch (e) { /* sin sessionStorage: no hay aviso, igual queda el login */ }
+    if (notice === 'expired') showLoginMessage(LOGIN_MESSAGES.expired);
+})();
+
 document.getElementById('loginForm').addEventListener('submit', async (e) => {
     e.preventDefault();
+    showLoginMessage('');
     const formData = new URLSearchParams();
     formData.append('username', document.getElementById('username').value);
     formData.append('password', document.getElementById('password').value);
@@ -216,11 +246,15 @@ document.getElementById('loginForm').addEventListener('submit', async (e) => {
             const data = await response.json();
             localStorage.setItem('access_token', data.access_token);
             await initSession(data.access_token);
+        } else if (response.status === 429) {
+            showLoginMessage(LOGIN_MESSAGES[429]);
+        } else if (response.status === 403) {
+            showLoginMessage(LOGIN_MESSAGES[403]);
         } else {
-            alert('Credenciales incorrectas');
+            showLoginMessage(LOGIN_MESSAGES.bad);
         }
     } catch (error) {
-        alert('Error de servidor.');
+        showLoginMessage(LOGIN_MESSAGES.network);
     }
 });
 
@@ -229,6 +263,7 @@ async function fetchAppointments(token) {
         const response = await fetch(`${API_URL}/admin/appointments`, {
             headers: { 'Authorization': `Bearer ${token}` }
         });
+        if (response.status === 401) return sessionExpired();
         if (!response.ok) return logout();
         const appointments = await response.json();
         allAppointmentsCache = appointments;
@@ -238,7 +273,8 @@ async function fetchAppointments(token) {
     }
 }
 
-// Escapa texto que viene de clientes antes de meterlo en innerHTML (anti-XSS)
+// Escapa TODO lo que viene del servidor antes de meterlo en innerHTML (anti-XSS). Los números van con Number().
+// tests/test_bloque3.py controla que en panel.js ningún dato del servidor entre crudo a un template.
 function escapeHtml(value) {
     return String(value ?? '')
         .replace(/&/g, '&amp;')
@@ -344,7 +380,7 @@ function renderAgenda(appointments) {
                 dayHtml += `
                     <div class="appointment-item ${isCancelled ? 'appt-cancelled' : ''}">
                         <div class="appt-details">
-                            <h3 class="appt-time">${app.time.substring(0, 5)} - ${endTime}</h3>
+                            <h3 class="appt-time">${escapeHtml(String(app.time).substring(0, 5))} - ${endTime}</h3>
                             <div class="name">${escapeHtml(app.client_name)}</div>
                             <div class="service-meta">
                                 <span class="service">${escapeHtml(app.service)}</span>
@@ -385,6 +421,7 @@ async function cancelarTurno(id) {
             method: 'DELETE',
             headers: { 'Authorization': `Bearer ${token}` }
         });
+        if (response.status === 401) return sessionExpired();
         if (response.ok) {
             fetchAppointments(token);
         } else {
@@ -417,6 +454,14 @@ function logout() {
     localStorage.removeItem('access_token');
     currentUser = null;
     window.location.reload();
+}
+
+// La API dijo 401 (token vencido, inválido o de antes del cambio a 24 h): al login, con aviso.
+function sessionExpired() {
+    try {
+        sessionStorage.setItem('login_notice', 'expired');
+    } catch (e) { /* sin sessionStorage: vuelve al login sin el aviso */ }
+    logout();
 }
 
 // ==========================================
@@ -496,7 +541,7 @@ async function loadMetricsData() {
             headers: { 'Authorization': `Bearer ${token}` }
         });
 
-        if (res.status === 401) return logout();
+        if (res.status === 401) return sessionExpired();
         if (!res.ok) {
             console.error("Error obteniendo métricas:", res.status);
             return;
@@ -563,8 +608,8 @@ function renderRevenueBarChart(series) {
                         <div class="bar-segment-real" style="height: ${realSharePct}%;" title="Cobrado: ${formatARS(item.real_revenue)}"></div>
                     </div>
                 </div>
-                <div class="bar-bottom-label">${item.label}</div>
-                <div class="bar-bottom-sub">${item.appointments} t.</div>
+                <div class="bar-bottom-label">${escapeHtml(item.label)}</div>
+                <div class="bar-bottom-sub">${Number(item.appointments) || 0} t.</div>
             </div>
         `;
     }).join('');
@@ -609,7 +654,7 @@ function renderDonutCharts(data) {
             </svg>
             <div class="donut-info">
                 <span class="donut-title">Turnos Completados</span>
-                <span class="donut-sub">${data.completed_appointments} de ${data.total_appointments} turnos</span>
+                <span class="donut-sub">${Number(data.completed_appointments) || 0} de ${Number(data.total_appointments) || 0} turnos</span>
             </div>
         </div>
     `;
@@ -743,6 +788,7 @@ async function showSchedule() {
             headers: { 'Authorization': `Bearer ${token}` }
         });
 
+        if (response.status === 401) return sessionExpired();
         if (response.ok) {
             const horariosGuardados = await response.json();
 
@@ -804,6 +850,7 @@ document.getElementById('scheduleForm').addEventListener('submit', async functio
             body: JSON.stringify(payload)
         });
 
+        if (response.status === 401) return sessionExpired();
         if (response.ok) {
             await loadWorkingDaysConfig(token);
             alert('Horarios guardados correctamente');
@@ -854,7 +901,7 @@ async function loadExceptions() {
             headers: { 'Authorization': `Bearer ${token}` }
         });
 
-        if (response.status === 401) return logout();
+        if (response.status === 401) return sessionExpired();
         if (!response.ok) throw new Error('Error al obtener excepciones');
 
         const exceptions = await response.json();
@@ -865,11 +912,14 @@ async function loadExceptions() {
         }
 
         listContainer.innerHTML = exceptions.map(exc => {
-            const [year, month, day] = exc.date.split('-');
-            const formattedDate = `${day}/${month}/${year}`;
+            // Todo lo que viene del servidor va por escapeHtml (el nombre del barbero lo escribe una persona)
+            const [year, month, day] = String(exc.date).split('-');
+            const formattedDate = escapeHtml(`${day}/${month}/${year}`);
             const timeRange = (exc.start_time && exc.end_time)
-                ? `${exc.start_time.substring(0, 5)} a ${exc.end_time.substring(0, 5)} hs`
+                ? escapeHtml(`${String(exc.start_time).substring(0, 5)} a ${String(exc.end_time).substring(0, 5)} hs`)
                 : 'Día completo';
+            const employeeName = escapeHtml(exc.employee_name);
+            const safeId = Number(exc.id);
 
             return `
                 <div class="exception-item">
@@ -879,10 +929,10 @@ async function loadExceptions() {
                         </div>
                         <div class="exception-sub-text">
                             <span class="exc-badge">${timeRange}</span>
-                            <span>• ${exc.employee_name}</span>
+                            <span>• ${employeeName}</span>
                         </div>
                     </div>
-                    <button type="button" class="btn-delete-exc" onclick="deleteException(${exc.id})">
+                    <button type="button" class="btn-delete-exc" onclick="deleteException(${safeId})">
                         Eliminar
                     </button>
                 </div>
@@ -926,6 +976,7 @@ document.getElementById('exceptionForm').addEventListener('submit', async functi
             body: JSON.stringify({ date, start_time, end_time, is_global })
         });
 
+        if (response.status === 401) return sessionExpired();
         const data = await response.json();
 
         if (!response.ok) {
@@ -940,7 +991,7 @@ document.getElementById('exceptionForm').addEventListener('submit', async functi
         }
 
         if (data.affected_appointments > 0) {
-            alert(`Excepción registrada. Atención: ya tenés ${data.affected_appointments} turno(s) confirmado(s) en ese horario. Revisá tu agenda para avisarles por WhatsApp.`);
+            alert(`Excepción registrada. Atención: ya tenés ${Number(data.affected_appointments) || 0} turno(s) confirmado(s) en ese horario. Revisá tu agenda para avisarles por WhatsApp.`);
         }
 
         loadExceptions();
@@ -959,6 +1010,7 @@ async function deleteException(id) {
             headers: { 'Authorization': `Bearer ${token}` }
         });
 
+        if (response.status === 401) return sessionExpired();
         const data = await response.json();
         if (!response.ok) {
             alert(data.detail || 'No tenés permiso para eliminar este bloqueo.');

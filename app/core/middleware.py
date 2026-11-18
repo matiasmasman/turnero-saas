@@ -2,6 +2,7 @@ import uuid
 import time
 from fastapi import Request
 from starlette.middleware.base import BaseHTTPMiddleware
+from app.core.request_info import NO_IP
 from app.core.telemetry import sec_logger
 
 class SecurityTelemetryMiddleware(BaseHTTPMiddleware):
@@ -9,7 +10,8 @@ class SecurityTelemetryMiddleware(BaseHTTPMiddleware):
         request_id = str(uuid.uuid4())
         request.state.request_id = request_id
 
-        client_ip = request.client.host if request.client else "0.0.0.0"
+        # La IP real ya la puso uvicorn (proxy headers solo desde 127.0.0.1): ver app/core/request_info.py
+        client_ip = request.client.host if request.client else NO_IP
         request.state.client_ip = client_ip
 
         start_time = time.time()
