@@ -268,10 +268,10 @@ def test_reservar_con_y_sin_descuento_viendo_el_precio_final(tabs, server):
     expect(price.locator("s")).to_have_count(0)
     expect(discount).to_be_enabled()
     expect(discount).to_have_value("")
-    assert tab.options("#discount") == ["Descuento", "Promo E3E — $8.000"]
+    assert tab.options("#discount") == ["Descuento", "Promo E3E"]
 
     tab.apply_discount(did)
-    assert tab.options("#discount") == ["Quitar descuento", "Promo E3E — $8.000"]
+    assert tab.options("#discount") == ["Quitar descuento", "Promo E3E"]
     expect(discount).to_have_value(str(did))
     expect(price.locator("s")).to_have_text("$10.000")
     expect(price.locator("strong")).to_have_text("$8.000")
@@ -322,7 +322,7 @@ def test_cambiar_de_servicio_quita_el_descuento(tabs, server):
 
     page.select_option("#service", str(b))               # otro servicio: sin descuento y con sus opciones
     expect(page.locator("#discount")).to_have_value("")
-    assert tab.options("#discount") == ["Descuento", "Promo B E3E — $5.000"]
+    assert tab.options("#discount") == ["Descuento", "Promo B E3E"]
     expect(page.locator("#servicePrice")).to_have_text("$7.000")
 
     page.select_option("#service", str(a))               # volver al primero tampoco lo recupera
@@ -363,7 +363,7 @@ def test_nombres_con_signos_se_ven_como_texto(tabs, server):
         expect(page.locator(f"#service option[value='{sid}']")).to_have_text(XSS)
         tab.choose(sid, PEDRO)
         assert tab.options("#employee_id") == ["Cualquiera disponible", "<b>Pedro</b> O'Neil"]
-        expect(page.locator(f"#discount option[value='{did}']")).to_have_text("<b>D'Angelo</b> E3E — $900")
+        expect(page.locator(f"#discount option[value='{did}']")).to_have_text("<b>D'Angelo</b> E3E")
         tab.apply_discount(did)
         expect(page.locator("#servicePrice")).to_have_text("$1.000$900")
         # nada se interpretó como HTML: en el precio solo <s> y <strong>, y ningún <img>/<b> en el formulario

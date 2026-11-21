@@ -105,7 +105,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
         discountSelect.replaceChildren(
             option('', discountId === null ? 'Descuento' : 'Quitar descuento'),
-            ...discounts.map(d => option(d.id, `${d.name} — ${fmtPrice(d.price)}`)));
+            ...discounts.map(d => option(d.id, d.name)));
         discountSelect.value = discountId === null ? '' : String(discountId);
         discountSelect.disabled = false;
     }

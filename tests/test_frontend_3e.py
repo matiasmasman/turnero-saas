@@ -32,7 +32,7 @@ def test_el_js_no_arma_html_con_texto_ni_usa_ventanitas():
 def test_los_nombres_van_con_textcontent_y_los_eventos_con_addeventlistener():
     assert "o.textContent = text;" in JS and "node.textContent = text;" in JS
     assert "option(s.id, s.name)" in JS                              # el desplegable: solo nombres
-    assert "option(d.id, `${d.name} — ${fmtPrice(d.price)}`)" in JS
+    assert "option(d.id, d.name)" in JS
     assert "option('', discountId === null ? 'Descuento' : 'Quitar descuento')" in JS
     assert "option('', 'Sin descuentos')" in JS
     assert "options.push(option(b.id, b.name))" in JS
@@ -96,4 +96,4 @@ def test_el_formulario_no_tiene_nombres_onclick_ni_estilos_en_linea():
 
 def test_versiones_de_cache_subidas():
     assert 'href="css/main.css?v=5"' in HTML
-    assert 'src="js/index.js?v=9"' in HTML
+    assert 'src="js/index.js?v=10"' in HTML
